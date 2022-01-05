@@ -28,7 +28,7 @@ library(ggplot2)
 library(ConsReg)
 library(quadprog)
 library(cowplot)
-
+library(forecast)
 
 #read in data ####
 
@@ -190,19 +190,67 @@ data2 <- relocate(data2, t)
 #rolling window regressions ####
 #if we have data on the full year 2021, then we would have 31 full rolling windows 
 #df=number observations - number of parameters (including intercept)
+# # 
+# for (i in 1:31) {
+#   data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
+#   reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,
+#                  constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(3.5,-0.5,0.1,0.2))
+# 
+#   X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
+# 
+#   as.vector(assign(paste0("coefficients_", i), summary(reg)$coeff[1:4]))
+#   as.vector(assign(paste0("variances_coefficients_", i), (summary(reg)$coeff[5:8])^2))
+# 
+#   assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-4))
+# 
+#   #variance-covariance matrices = sigma2*(X'X)^-1
+#   assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-4)) * solve(crossprod(X)))
+# }
+# 
+# #average of all coefficients, their variances and the variance of the estimate (i.e. of the residuals/regression)
+# coefficients <- do.call(rbind, lapply( paste0("coefficients_", 1:31) , get) )
+# variances_coefficients <- do.call(rbind, lapply( paste0("variances_coefficients_", 1:31) , get) )
+# 
+# coefficients_0 <- as.vector(colMeans(coefficients))[2:4]
+# variances_coefficients_0 <- as.vector(colMeans(variances_coefficients))[2:4]
+# 
+# variance_estimate <- do.call(rbind, lapply( paste0("variance_estimate_", 1:31) , get) )
+# variance_estimate_0 <- as.vector(colMeans(variance_estimate))
+# 
+# variance_NAIRU <- var(data1$NAIRU,na.rm = TRUE)
+# 
+# #average of all variance-covariance matrices
+# covariances_0 <- do.call(cbind, lapply( paste0("covariance_matrix_", 1:i) , get))
+# covariances_0  <- array(covariances_0, dim=c(4,4,i))
+# covariances_0 <- apply(covariances_0 , c(1, 2), mean, na.rm = TRUE)
+# 
+# #print output
+# variances_coefficients_0
+# variance_estimate_0
+# variance_NAIRU
+# covariances_0
 
+#rolling window regressions with ARMA errors ####
+# 
+# #test for auto-correlated errors and examining the ARMA structure of the errors 
+# # acf(reg$residuals)
+# # pacf(reg$residuals)
+# # auto.arima(residuals(reg))
+# 
+# 
 for (i in 1:31) {
-  data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12) 
-  reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,
-                 constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(3.5,-0.5,0.1,0.2))
-  
+  data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
+  reg <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(0, 1),
+                            constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',ini.pars.coef = c(3.5,-0.5,0.1,0.2))
+
+
   X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
-  
+
   as.vector(assign(paste0("coefficients_", i), summary(reg)$coeff[1:4]))
   as.vector(assign(paste0("variances_coefficients_", i), (summary(reg)$coeff[5:8])^2))
-  
+
   assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-4))
-  
+
   #variance-covariance matrices = sigma2*(X'X)^-1
   assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-4)) * solve(crossprod(X)))
 }
@@ -219,17 +267,16 @@ variance_estimate_0 <- as.vector(colMeans(variance_estimate))
 
 variance_NAIRU <- var(data1$NAIRU,na.rm = TRUE)
 
-#average of all variance-covariance matrices 
+#average of all variance-covariance matrices
 covariances_0 <- do.call(cbind, lapply( paste0("covariance_matrix_", 1:i) , get))
 covariances_0  <- array(covariances_0, dim=c(4,4,i))
 covariances_0 <- apply(covariances_0 , c(1, 2), mean, na.rm = TRUE)
 
 #print output
 variances_coefficients_0
-variance_estimate_0 
+variance_estimate_0
 variance_NAIRU
 covariances_0
-
 
 #EKF recursions ####
 
@@ -350,14 +397,15 @@ x_post_data$date <- as.POSIXct(x_post_data$date, format="%Y-%m-%d")
 
 colnames(x_post_data) <- c("unemploymentgap","kappa","gamma","theta","date")
 
-
+png(filename = here("1_Plots/parameters_autocorrelated.png") , height=350, width=350)
 a <- ggplot(data = x_post_data,mapping = aes(x = date, y = unemploymentgap,group = 1)) + geom_line()
 b <- ggplot(data = x_post_data,mapping = aes(x = date, y = kappa,group = 1)) + geom_line()
 c <- ggplot(data = x_post_data,mapping = aes(x = date, y = gamma,group = 1)) + geom_line()
 d <- ggplot(data = x_post_data,mapping = aes(x = date, y = theta,group = 1)) + geom_line()
 
-plot_grid(a, b, c, d, labels = "AUTO")
 
+plot_grid(a, b, c, d, labels = "AUTO")
+dev.off()
 
 
 
