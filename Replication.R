@@ -150,7 +150,7 @@ data1$t <- 1:nrow(data1)
 data1 <- relocate(data1, t) 
 
 data1 <- as_tibble(data1)
-write_csv(data1, "model_input_data.csv")
+write_csv(data1, here('0_Data/model_input_data.csv'))
 
 data2 <- filter(data,date > "1981-09-01" & date < "2021-08-01")
 data2$t <- 1:nrow(data2) 
