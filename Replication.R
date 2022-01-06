@@ -29,6 +29,7 @@ library(ConsReg)
 library(quadprog)
 library(cowplot)
 library(forecast)
+library(lmtest)
 
 #read in data ####
 
@@ -236,13 +237,16 @@ data2 <- relocate(data2, t)
 # # acf(reg$residuals)
 # # pacf(reg$residuals)
 # # auto.arima(residuals(reg))
-# 
+# # bgtest(reg,order=4)
 # 
 for (i in 1:31) {
   data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
+  
+  reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
+  
   reg <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(0, 1),
-                            constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',ini.pars.coef = c(3.5,-0.5,0.1,0.2))
-
+                      constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+  
 
   X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
 
