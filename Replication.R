@@ -194,8 +194,11 @@ data2 <- relocate(data2, t)
 # # 
 # for (i in 1:31) {
 #   data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
+# 
+#   reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
+# 
 #   reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,
-#                  constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(3.5,-0.5,0.1,0.2))
+#                  constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
 # 
 #   X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
 # 
@@ -261,6 +264,7 @@ for (i in 1:31) {
 
 #average of all coefficients, their variances and the variance of the estimate (i.e. of the residuals/regression)
 coefficients <- do.call(rbind, lapply( paste0("coefficients_", 1:31) , get) )
+coefficients[,2] <- (-1)*coefficients[,2]
 variances_coefficients <- do.call(rbind, lapply( paste0("variances_coefficients_", 1:31) , get) )
 
 coefficients_0 <- as.vector(colMeans(coefficients))[2:4]
@@ -327,7 +331,7 @@ for (i in 1:(nrow(data2)-3)) {
   
   # For tracking progress
   if (y > variance_estimate_0) {
-    print(paste0("the estimated residual with value ",y," is larger than average initial shock variance at iteration ",data2$date[i]))
+    print(paste0("the estimated residual with value ",y," is larger than average initial shock variance at iteration ",data2$date[i+3]))
     #y <- variance_estimate_0
   }
   
@@ -336,6 +340,9 @@ for (i in 1:(nrow(data2)-3)) {
   P_post <- (diag(1,4,4) - K %*% H(i)) %*% P_prior
   
   if (x_post[2,i+1]<0 | x_post[3,i+1]<0 | x_post[4,i+1]<0 | x_post[4,i+1]>1) {
+    
+    print(paste0("one of the constraints is binding at iteration ", i, " and time ",data2$date[i+3], " with values ",cat(x_post[,i+1],"\n",sep="\t")))
+
     
     #constraints for the quadratic optimization problem 
     # lower-bounds 
@@ -392,24 +399,77 @@ plot(x_post[2,],type="line",sub ="kappa",xlab = "",ylab = "")
 plot(x_post[3,],type="line",sub ="gamma",xlab = "",ylab = "")
 plot(x_post[4,],type="line",sub ="theta",xlab = "",ylab = "")
 
-#using ggplot
+#using ggplot and FRED recession bars 
 #convert matrix to a wide data frame, delete starting values (first row)
 x_post_data <- as.data.frame(t(x_post))
 x_post_data <- x_post_data[-1,]
 x_post_data$date <- c(as.character(data2$date[-(1:3)]))
-x_post_data$date <- as.POSIXct(x_post_data$date, format="%Y-%m-%d")
+x_post_data$date <- as.Date(as.POSIXct(x_post_data$date, format="%Y-%m-%d"))
 
 colnames(x_post_data) <- c("unemploymentgap","kappa","gamma","theta","date")
+x_post_data$NAIRU <- (x_post_data$unemploymentgap - data1$unemp)*(-1)
 
-png(filename = here("1_Plots/parameters_autocorrelated.png") , height=350, width=350)
-a <- ggplot(data = x_post_data,mapping = aes(x = date, y = unemploymentgap,group = 1)) + geom_line()
-b <- ggplot(data = x_post_data,mapping = aes(x = date, y = kappa,group = 1)) + geom_line()
-c <- ggplot(data = x_post_data,mapping = aes(x = date, y = gamma,group = 1)) + geom_line()
-d <- ggplot(data = x_post_data,mapping = aes(x = date, y = theta,group = 1)) + geom_line()
+recessions.df = read.table(textConnection(
+  "Peak, Trough
+1857-06-01, 1858-12-01
+1860-10-01, 1861-06-01
+1865-04-01, 1867-12-01
+1869-06-01, 1870-12-01
+1873-10-01, 1879-03-01
+1882-03-01, 1885-05-01
+1887-03-01, 1888-04-01
+1890-07-01, 1891-05-01
+1893-01-01, 1894-06-01
+1895-12-01, 1897-06-01
+1899-06-01, 1900-12-01
+1902-09-01, 1904-08-01
+1907-05-01, 1908-06-01
+1910-01-01, 1912-01-01
+1913-01-01, 1914-12-01
+1918-08-01, 1919-03-01
+1920-01-01, 1921-07-01
+1923-05-01, 1924-07-01
+1926-10-01, 1927-11-01
+1929-08-01, 1933-03-01
+1937-05-01, 1938-06-01
+1945-02-01, 1945-10-01
+1948-11-01, 1949-10-01
+1953-07-01, 1954-05-01
+1957-08-01, 1958-04-01
+1960-04-01, 1961-02-01
+1969-12-01, 1970-11-01
+1973-11-01, 1975-03-01
+1980-01-01, 1980-07-01
+1981-07-01, 1982-11-01
+1990-07-01, 1991-03-01
+2001-03-01, 2001-11-01
+2007-12-01, 2009-06-01
+2020-02-01, 2020-04-01"), sep=',',
+  colClasses=c('Date', 'Date'), header=TRUE)
 
+recessions.trim = subset(recessions.df, Peak >= min(data1$date))
 
-plot_grid(a, b, c, d, labels = "AUTO")
+png(filename = here("1_Plots/NAIRU.png") , height=350, width=350)
+a <- ggplot(x_post_data) + geom_line( aes(x = date, y = NAIRU,group = 1)) + theme_bw()
+a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 dev.off()
 
+png(filename = here("1_Plots/kappa.png") , height=350, width=350)
+b <- ggplot(x_post_data) + geom_line( aes(x = date, y = kappa,group = 1)) + theme_bw()
+b + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+dev.off()
 
+png(filename = here("1_Plots/gamma.png") , height=350, width=350)
+c <- ggplot(x_post_data) + geom_line( aes(x = date, y = gamma,group = 1)) + theme_bw()
+c + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+dev.off()
+
+png(filename = here("1_Plots/theta.png") , height=350, width=350)
+d <- ggplot(x_post_data) + geom_line( aes(x = date, y = theta,group = 1)) + theme_bw()
+d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+dev.off()
+
+png(filename = here("1_Plots/parameters.png") , height=350, width=350)
+plot_grid(a, b, c, d, labels = "AUTO")
+dev.off()
 
