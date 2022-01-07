@@ -22,7 +22,7 @@ library(lmtest)
 
 #covid dummy
 covid <- as.data.frame(read_csv(here('0_Data/phillips_corona.csv'))) %>%
-  select(c(covid,date))
+  select(c(covid,date,cpaltt01usm659n))
 
 #data unemployment (sa)
 unemployment <- read_csv(here('0_Data/UNRATE.csv')) %>%
@@ -65,7 +65,14 @@ for (i in 2:nrow(cpi)) {
   cpi$monthly_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-1])/cpi$cpi[i-1])*100
 }
 
+cpi$quarterly_annualized_inflation <- NA
+for (i in 5:nrow(cpi)) {
+  cpi$quarterly_annualized_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-4])/cpi$cpi[i-4])*100*4
+}
+
 cpi$annualized_inflation <- cpi$monthly_inflation*12
+#cpi$annualized_inflation <- cpi$monthly_inflation
+
 
 cpi$yoy_inflation <- NA
 for (i in 13:nrow(cpi)) {
@@ -126,10 +133,11 @@ data <- merge(unemployment,inflation_expectation,by.x = "DATE", by.y = "DATE", a
   merge(cpi,by.x = "DATE", by.y = "DATE", all.x = TRUE) %>%
   merge(covid,by.x = "DATE", by.y = "date", all.x = TRUE) %>%
   mutate(expect_yoy = expect-lag(yoy_inflation,3L)) %>%
+  rename(annualized_inflation_1 = cpaltt01usm659n) %>%
   mutate(relativeimportpriceinflation = importpriceinflation-annualized_inflation) %>%
   rename(date = DATE) %>%
   relocate(covid, .after = date) %>%
-  select(c(date,covid,unemp,expect,importpriceinflation,NAIRU,annualized_inflation,yoy_inflation,expect_yoy,relativeimportpriceinflation))
+  select(c(date,covid,unemp,expect,importpriceinflation,NAIRU,annualized_inflation,yoy_inflation,expect_yoy,relativeimportpriceinflation,annualized_inflation_1))
 
 
 #subset of sample that contains data for all variables (expected inflation)
@@ -297,7 +305,7 @@ F <- diag(c(rho,1,1,1), 4, 4)
 
 h <- function(i) {
   (x_prior[2,i])*(x_prior[1,i]) + x_prior[3,i]*data2$relativeimportpriceinflation[i+3] + x_prior[4,i]*data2$expect[i+3] + (1-x_prior[4,i])*data2$yoy_inflation[i]
-}
+  }
 
 H <- function(i) {
   t(c((x_prior[2,i]), (x_prior[1,i]), data2$relativeimportpriceinflation[i+3], (data2$expect[i+3]-data2$yoy_inflation[i])))
@@ -476,7 +484,7 @@ d <- ggplot(x_post_data) + geom_line( aes(x = date, y = theta,group = 1)) + them
 d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 dev.off()
 
-e <- ggplot(x_post_data) + geom_line( aes(x = date, y = yoy_inflation,group = 1)) + theme_bw()
+e <- ggplot(x_post_data) + geom_line( aes(x = date, y = annualizedinflation,group = 1)) + theme_bw()
 e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 
 png(filename = here("1_Plots/parameters.png") , height=350, width=350)
