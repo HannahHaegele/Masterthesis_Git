@@ -1,16 +1,3 @@
-#16/12/21 interpolation, finalizing dataset 
-#17/12/21 fixed window regressions -> estimates, variances -> current version 
-#18/12/21 import price inflation neu (plus alternative estimation); seasonal adjustment angefangen 
-#20/12/21 v3 
-#21/12/21 v4, mistake in sqrt(diag(vcov(reg)))) -> diag(vcov(reg))
-#22/12/21 fixed mistake with data in rolling window (used data1 previously instead of data), covariance matrices, 
-#         fixed mistake with lagged values of lagged yoy_inflation (both in dataset creation and h function, H Jacobian)
-
-#differences v4: constrained least squares using ConsReg instead of non-constrained least squares 
-#                full Q matrix (covariance averages) instead of diagonal Q matrix 
-#differences v5: function h now includes lagged yoy_inflation (by one quarter)
-#differences v6: tried to implement the first constraint in the filter (quadratic programming problem)
-
 
 #preamble ####
 rm(list = ls())
@@ -371,13 +358,13 @@ for (i in 1:(nrow(data2)-3)) {
     Dmat[lower.tri(Dmat)] <- c(P_post_inv[1,2]+P_post_inv[2,1], P_post_inv[1,3]+P_post_inv[3,1],P_post_inv[1,4]+P_post_inv[4,1],P_post_inv[2,3]+P_post_inv[3,2],P_post_inv[2,4]+P_post_inv[4,2],P_post_inv[3,4]+P_post_inv[4,3])
     Dmat[upper.tri(Dmat)] <- c(P_post_inv[1,2]+P_post_inv[2,1], P_post_inv[1,3]+P_post_inv[3,1],P_post_inv[2,3]+P_post_inv[3,2],P_post_inv[4,1]+P_post_inv[1,4],P_post_inv[2,4]+P_post_inv[4,2],P_post_inv[3,4]+P_post_inv[4,3])
     
-    a <- t(-x_post[,i+1]) %*% P_post_inv[,1] + P_post_inv[1,2] * (-x_post[2,i+1]) + P_post_inv[1,3] * (-x_post[3,i+1]) + P_post_inv[1,4] * (-x_post[4,i+1])
+    a <- t(-x_post[,i+1]) %*% P_post_inv[,1] + P_post_inv[1,1] * (-x_post[1,i+1]) + P_post_inv[1,2] * (-x_post[2,i+1]) + P_post_inv[1,3] * (-x_post[3,i+1]) + P_post_inv[1,4] * (-x_post[4,i+1])
     
-    b <- t(-x_post[,i+1]) %*% P_post_inv[,2] + P_post_inv[2,1] * (-x_post[1,i+1]) + P_post_inv[2,3] * (-x_post[3,i+1]) + P_post_inv[2,4] * (-x_post[4,i+1])
+    b <- t(-x_post[,i+1]) %*% P_post_inv[,2] + P_post_inv[2,2] * (-x_post[2,i+1]) + P_post_inv[2,1] * (-x_post[1,i+1]) + P_post_inv[2,3] * (-x_post[3,i+1]) + P_post_inv[2,4] * (-x_post[4,i+1])
     
-    c <- t(-x_post[,i+1]) %*% P_post_inv[,3] + P_post_inv[3,1] * (-x_post[1,i+1]) + P_post_inv[3,2] * (-x_post[2,i+1]) + P_post_inv[3,4] * (-x_post[4,i+1])
+    c <- t(-x_post[,i+1]) %*% P_post_inv[,3] + P_post_inv[3,3] * (-x_post[3,i+1]) + P_post_inv[3,1] * (-x_post[1,i+1]) + P_post_inv[3,2] * (-x_post[2,i+1]) + P_post_inv[3,4] * (-x_post[4,i+1])
     
-    d <- t(-x_post[,i+1]) %*% P_post_inv[,4] + P_post_inv[4,1] * (-x_post[1,i+1]) + P_post_inv[4,2] * (-x_post[2,i+1]) + P_post_inv[4,3] * (-x_post[3,i+1])
+    d <- t(-x_post[,i+1]) %*% P_post_inv[,4] + P_post_inv[4,4] * (-x_post[4,i+1]) + P_post_inv[4,1] * (-x_post[1,i+1]) + P_post_inv[4,2] * (-x_post[2,i+1]) + P_post_inv[4,3] * (-x_post[3,i+1])
     
     dvec <- c(-a,-b,-c,-d)
     
@@ -387,7 +374,14 @@ for (i in 1:(nrow(data2)-3)) {
     
   }
   
-  
+  # #control of quadratic programming representation 
+  # constante <- (-x_post[,i+1] %*% P_post_inv[,1]) %*% (-x_post[1,i+1]) +
+  #   (-x_post[,i+1] %*% P_post_inv[,2]) %*% (-x_post[2,i+1]) +
+  #   (-x_post[,i+1] %*% P_post_inv[,3]) %*% (-x_post[3,i+1]) +
+  #   (-x_post[,i+1] %*% P_post_inv[,4]) %*% (-x_post[4,i+1]) 
+  # 
+  # abs(t(solve.QP(Dmat,dvec,Amat,bvec=bvec)$solution-x_post[,i+1]) %*% P_post_inv %*% (solve.QP(Dmat,dvec,Amat,bvec=bvec)$solution-x_post[,i+1]) - constante - solve.QP(Dmat,dvec,Amat,bvec=bvec)$value) < 1e-8
+  # 
 }
 
 #plotting results ####
@@ -404,10 +398,19 @@ plot(x_post[4,],type="line",sub ="theta",xlab = "",ylab = "")
 x_post_data <- as.data.frame(t(x_post))
 x_post_data <- x_post_data[-1,]
 x_post_data$date <- c(as.character(data2$date[-(1:3)]))
-x_post_data$date <- as.Date(as.POSIXct(x_post_data$date, format="%Y-%m-%d"))
+x_post_data$date <- as.Date(x_post_data$date, format="%Y-%m-%d")
+
 
 colnames(x_post_data) <- c("unemploymentgap","kappa","gamma","theta","date")
 x_post_data$NAIRU <- (x_post_data$unemploymentgap - data1$unemp)*(-1)
+x_post_data$unemp <- data1$unemp
+x_post_data$annualizedinflation <- data1$annualized_inflation
+x_post_data$yoy_inflation <- data1$yoy_inflation
+x_post_data$inflation <- c()
+
+for (i in 1:nrow(x_post_data)) {
+  x_post_data$inflation[i] <- (x_post_data[i,1])*(x_post_data[i,2]) + x_post_data[i,3]*data2$relativeimportpriceinflation[i+3] + x_post_data[i,4]*data2$expect[i+3] + (1-x_post_data[i,4])*data2$yoy_inflation[i]
+}
 
 recessions.df = read.table(textConnection(
   "Peak, Trough
@@ -447,11 +450,15 @@ recessions.df = read.table(textConnection(
 2020-02-01, 2020-04-01"), sep=',',
   colClasses=c('Date', 'Date'), header=TRUE)
 
-recessions.trim = subset(recessions.df, Peak >= min(data1$date))
+recessions.trim = subset(recessions.df, Trough >= min(data1$date))
 
 png(filename = here("1_Plots/NAIRU.png") , height=350, width=350)
-a <- ggplot(x_post_data) + geom_line( aes(x = date, y = NAIRU,group = 1)) + theme_bw()
-a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+a <- ggplot(x_post_data) + geom_line( aes(x = date, y = NAIRU,group = 1),color='red') + theme_bw()
+a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
+    geom_line(aes(x = date, y = unemp,group = 1),color='blue') +
+    scale_colour_manual("", 
+                      breaks = c("NAIRU", "unemplyment"),
+                      values = c("red", "blue")) 
 dev.off()
 
 png(filename = here("1_Plots/kappa.png") , height=350, width=350)
@@ -469,7 +476,20 @@ d <- ggplot(x_post_data) + geom_line( aes(x = date, y = theta,group = 1)) + them
 d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 dev.off()
 
+e <- ggplot(x_post_data) + geom_line( aes(x = date, y = yoy_inflation,group = 1)) + theme_bw()
+e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+
 png(filename = here("1_Plots/parameters.png") , height=350, width=350)
 plot_grid(a, b, c, d, labels = "AUTO")
 dev.off()
+
+
+inflation <- function(i) {
+  (x_post_data[i,1])*(x_post_data[i,2]) + x_post_data[i,3]*data2$relativeimportpriceinflation[i+3] + x_post_data[4,i]*data2$expect[i+3] + (1-x_post_data[4,i])*data2$yoy_inflation[i]
+}
+
+
+
+
+
 
