@@ -66,6 +66,15 @@ for (i in 5:nrow(cpi)) {
   cpi$annualized_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-3])/cpi$cpi[i-3])*100*4
 }
 
+cpi$monthly_inflation <- NA
+for (i in 2:nrow(cpi)) {
+  cpi$monthly_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-1])/cpi$cpi[i-1])*100
+}
+cpi$annualized_inflation1 <- cpi$monthly_inflation*12
+
+
+# e <- ggplot(cpi) + geom_line( aes(x = DATE, y = annualized_inflation,group = 1,color='red')) + theme_bw()
+# e + geom_line( aes(x = DATE, y = annualized_inflation1,group = 1,color='blue')) 
 
 # cpi$yoy_inflation <- NA
 # cpi$yoy_inflation <- (rollsumr(cpi$annualized_inflation, k = 12,fill=NA))/12
