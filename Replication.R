@@ -17,6 +17,7 @@ library(quadprog)
 library(cowplot)
 library(forecast)
 library(lmtest)
+library(zoo)
 
 #read in data ####
 
@@ -60,23 +61,18 @@ qs(inflationexpectation0.seas)
 #there is no evidence of seasonality in the original and hence the time series is not adjusted
 
 #inflation ####
-cpi$monthly_inflation <- NA
-for (i in 2:nrow(cpi)) {
-  cpi$monthly_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-1])/cpi$cpi[i-1])*100
-}
-
-cpi$quarterly_annualized_inflation <- NA
+cpi$annualized_inflation <- NA
 for (i in 5:nrow(cpi)) {
-  cpi$quarterly_annualized_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-4])/cpi$cpi[i-4])*100*4
+  cpi$annualized_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-3])/cpi$cpi[i-3])*100*4
 }
 
-cpi$annualized_inflation <- cpi$monthly_inflation*12
-#cpi$annualized_inflation <- cpi$monthly_inflation
 
+# cpi$yoy_inflation <- NA
+# cpi$yoy_inflation <- (rollsumr(cpi$annualized_inflation, k = 12,fill=NA))/12
 
 cpi$yoy_inflation <- NA
 for (i in 13:nrow(cpi)) {
-  cpi$yoy_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-12])/cpi$cpi[i-12])*100
+  cpi$yoy_inflation[i] <- (cpi$annualized_inflation[i-3]+cpi$annualized_inflation[i-6]+cpi$annualized_inflation[i-9]+cpi$annualized_inflation[i-12])/4
 }
 
 #import price inflation ####
