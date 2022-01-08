@@ -469,38 +469,62 @@ for (i in 1:(nrow(data1))) {
 
 #plotting NAIRU/unemployment ####
 
-#png(filename = here("1_Plots/NAIRU.png") , height=350, width=350)
-a <- ggplot(x_post_data) + geom_line( aes(x = date, y = NAIRU,group = 1),color='red') + theme_bw()
+a <- ggplot(x_post_data) + geom_line( aes(x = date, y = NAIRU,group = 1,colour='NAIRU')) + theme_bw()
 a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
-    geom_line(aes(x = date, y = unemp,group = 1),color='blue') +
-    scale_colour_manual("", 
-                      breaks = c("NAIRU", "unemplyment"),
-                      values = c("red", "blue")) 
-#dev.off()
+    geom_line(aes(x = date, y = unemp,group = 1,colour='unemployment rate')) +
+    scale_colour_manual(" ", values = c("NAIRU" ="red", "unemployment"="blue")) 
 
 #plotting kappa ####
 
-#png(filename = here("1_Plots/kappa.png") , height=350, width=350)
 b <- ggplot(x_post_data) + geom_line( aes(x = date, y = kappa,group = 1)) + theme_bw()
 b + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
-#dev.off()
 
 #plotting gamma #####
-#png(filename = here("1_Plots/gamma.png") , height=350, width=350)
+
 c <- ggplot(x_post_data) + geom_line( aes(x = date, y = gamma,group = 1)) + theme_bw()
 c + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
-#dev.off()
 
 #plotting theta #####
-#png(filename = here("1_Plots/theta.png") , height=350, width=350)
+
 d <- ggplot(x_post_data) + geom_line( aes(x = date, y = theta,group = 1)) + theme_bw()
 d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
-#dev.off()
 
 #plotting predicted/actual inflation #####
-e <- ggplot(x_post_data) + geom_line( aes(x = date, y = annualizedinflation,group = 1,color='red')) + theme_bw()
+e <- ggplot(x_post_data) + geom_line( aes(x = date, y = annualizedinflation,group = 1,colour='actual inflation')) + theme_bw()
 e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
-    geom_line(aes(x = date, y = inflation,group = 1),color='blue')
-
+    geom_line(aes(x = date, y = inflation,group = 1,colour='predicted inflation')) + 
+    scale_colour_manual(" ", values = c("actual inflation" ="red", "predicted inflation"="blue")) 
 #plot_grid(a, b, c, d, labels = "AUTO")
+
+
+#save plots ####
+
+png(filename = here("1_Plots/NAIRU.png") , height=350, width=350)
+a <- ggplot(x_post_data) + geom_line( aes(x = date, y = NAIRU,group = 1,colour='NAIRU')) + theme_bw()
+a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
+  geom_line(aes(x = date, y = unemp,group = 1,colour='unemployment rate')) +
+  scale_colour_manual(" ", values = c("NAIRU" ="red", "unemployment"="blue")) 
+dev.off()
+
+png(filename = here("1_Plots/kappa.png") , height=350, width=350)
+b <- ggplot(x_post_data) + geom_line( aes(x = date, y = kappa,group = 1)) + theme_bw()
+b + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+dev.off()
+
+png(filename = here("1_Plots/gamma.png") , height=350, width=350)
+c <- ggplot(x_post_data) + geom_line( aes(x = date, y = gamma,group = 1)) + theme_bw()
+c + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+dev.off()
+
+png(filename = here("1_Plots/theta.png") , height=350, width=350)
+d <- ggplot(x_post_data) + geom_line( aes(x = date, y = theta,group = 1)) + theme_bw()
+d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+dev.off()
+
+png(filename = here("1_Plots/fit.png") , height=350, width=350)
+e <- ggplot(x_post_data) + geom_line( aes(x = date, y = annualizedinflation,group = 1,colour='actual inflation')) + theme_bw()
+e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
+  geom_line(aes(x = date, y = inflation,group = 1,colour='predicted inflation')) + 
+  scale_colour_manual(" ", values = c("actual inflation" ="red", "predicted inflation"="blue")) 
+dev.off()
 
