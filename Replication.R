@@ -61,31 +61,31 @@ qs(inflationexpectation0.seas)
 #there is no evidence of seasonality in the original and hence the time series is not adjusted
 
 #inflation ####
+# cpi$annualized_inflation <- NA
+# for (i in 5:nrow(cpi)) {
+#   cpi$annualized_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-3])/cpi$cpi[i-3])*100*4
+# }
+
 cpi$annualized_inflation <- NA
-for (i in 5:nrow(cpi)) {
-  cpi$annualized_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-3])/cpi$cpi[i-3])*100*4
-}
-
-cpi$cpi$annualized_inflation1 <- NA
 for (i in 2:nrow(cpi)) {
-  cpi$cpi$annualized_inflation1[i] <- ((cpi$cpi[i]-cpi$cpi[i-1])/cpi$cpi[i-1])*100*12
+  cpi$annualized_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-1])/cpi$cpi[i-1])*100*12
 }
 
 
-e <- ggplot(cpi) + geom_line( aes(x = DATE, y = annualized_inflation,group = 1,color='red')) + theme_bw()
-e + geom_line( aes(x = DATE, y = annualized_inflation1,group = 1,color='blue'))
+# e <- ggplot(cpi) + geom_line( aes(x = DATE, y = annualized_inflation,group = 1,color='red')) + theme_bw()
+# e + geom_line( aes(x = DATE, y = annualized_inflation1,group = 1,color='blue'))
 
 # cpi$yoy_inflation <- NA
 # cpi$yoy_inflation <- (rollsumr(cpi$annualized_inflation, k = 12,fill=NA))/12
 
+# cpi$yoy_inflation <- NA
+# for (i in 13:nrow(cpi)) {
+#   cpi$yoy_inflation[i] <- (cpi$annualized_inflation[i-3]+cpi$annualized_inflation[i-6]+cpi$annualized_inflation[i-9]+cpi$annualized_inflation[i-12])/4
+# }
+
 cpi$yoy_inflation <- NA
 for (i in 13:nrow(cpi)) {
-  cpi$yoy_inflation[i] <- (cpi$annualized_inflation[i-3]+cpi$annualized_inflation[i-6]+cpi$annualized_inflation[i-9]+cpi$annualized_inflation[i-12])/4
-}
-
-cpi$yoy_inflation1 <- NA
-for (i in 13:nrow(cpi)) {
-  cpi$yoy_inflation1[i] <- (cpi$annualized_inflation[i-1]+cpi$annualized_inflation[i-2]+cpi$annualized_inflation[i-3]+cpi$annualized_inflation[i-4]+
+  cpi$yoy_inflation[i] <- (cpi$annualized_inflation[i-1]+cpi$annualized_inflation[i-2]+cpi$annualized_inflation[i-3]+cpi$annualized_inflation[i-4]+
                             cpi$annualized_inflation[i-5]+cpi$annualized_inflation[i-6]+cpi$annualized_inflation[i-7]+cpi$annualized_inflation[i-8]+
                             cpi$annualized_inflation[i-9]+cpi$annualized_inflation[i-10]+cpi$annualized_inflation[i-11]+cpi$annualized_inflation[i-12])/12
 }
@@ -95,8 +95,8 @@ for (i in 13:nrow(cpi)) {
 #   cpi$yoy_inflation1[i] <- ((cpi$cpi[i]-cpi$cpi[i-12])/cpi$cpi[i-12])*100
 # }
 
-e <- ggplot(cpi) + geom_line( aes(x = DATE, y = yoy_inflation,group = 1,color='red')) + theme_bw()
-e + geom_line( aes(x = DATE, y = yoy_inflation1,group = 1,color='blue'))
+# e <- ggplot(cpi) + geom_line( aes(x = DATE, y = yoy_inflation,group = 1,color='red')) + theme_bw()
+# e + geom_line( aes(x = DATE, y = yoy_inflation1,group = 1,color='blue'))
 
 #import price inflation ####
 
@@ -107,18 +107,18 @@ importpricedeflator <- merge(importpricedeflator, importpricedeflator2, by="DATE
   rename(IMPdef_monthly = spline.importpricedeflator..method....fmm...xout...monthly..y)
 
 #monthly growth rates (in percentage terms)
-importpricedeflator$importpriceinflation1  <- NA
+importpricedeflator$importpriceinflation  <- NA
 for (i in 2:nrow(importpricedeflator)) {
-  importpricedeflator$importpriceinflation1[i] <- ((importpricedeflator$IMPdef_monthly[i]-importpricedeflator$IMPdef_monthly[i-1])/importpricedeflator$IMPdef_monthly[i-1])*100*12
+  importpricedeflator$importpriceinflation[i] <- ((importpricedeflator$IMPdef_monthly[i]-importpricedeflator$IMPdef_monthly[i-1])/importpricedeflator$IMPdef_monthly[i-1])*100*12
 }
 
-importpricedeflator$importpriceinflation <- NA
-for (i in 5:nrow(importpricedeflator)) {
-  importpricedeflator$importpriceinflation[i] <- ((importpricedeflator$IMPdef_monthly[i]-importpricedeflator$IMPdef_monthly[i-3])/importpricedeflator$IMPdef_monthly[i-3])*100*4
-}
-
-e <- ggplot(importpricedeflator) + geom_line( aes(x = DATE, y = importpriceinflation,group = 1,color='red')) + theme_bw()
-e + geom_line( aes(x = DATE, y = importpriceinflation1,group = 1,color='blue'))
+# importpricedeflator$importpriceinflation <- NA
+# for (i in 5:nrow(importpricedeflator)) {
+#   importpricedeflator$importpriceinflation[i] <- ((importpricedeflator$IMPdef_monthly[i]-importpricedeflator$IMPdef_monthly[i-3])/importpricedeflator$IMPdef_monthly[i-3])*100*4
+# }
+# 
+# e <- ggplot(importpricedeflator) + geom_line( aes(x = DATE, y = importpriceinflation,group = 1,color='red')) + theme_bw()
+# e + geom_line( aes(x = DATE, y = importpriceinflation1,group = 1,color='blue'))
 
 drop.cols <- c('IMPdef','IMPdef_monthly')
 importpricedeflator <- importpricedeflator %>% select(-one_of(drop.cols))
@@ -171,7 +171,7 @@ data1 <- relocate(data1, t)
 data1 <- as_tibble(data1)
 write_csv(data1, here('0_Data/model_input_data.csv'))
 
-data2 <- filter(data,date > "1981-11-01" & date < "2021-08-01")
+data2 <- filter(data,date > "1981-12-01" & date < "2021-08-01")
 data2$t <- 1:nrow(data2) 
 data2 <- relocate(data2, t) 
 
@@ -310,8 +310,8 @@ covariances_0
 s = 15 
 rho = 0.9 
 
-x_prior <- matrix(NA, nrow = 4, ncol = nrow(data2)-3)
-x_post <- matrix(NA, nrow = 4, ncol = nrow(data2)-3+1)
+x_prior <- matrix(NA, nrow = 4, ncol = nrow(data2))
+x_post <- matrix(NA, nrow = 4, ncol = (nrow(data2)+1))
 x_post[,1] <- c(0,coefficients_0)
 #w <- c(s*variance_NAIRU,variances_coefficients_0)
 
@@ -327,31 +327,31 @@ P_post <- matrix(0, nrow = 4, ncol = 4)
 F <- diag(c(rho,1,1,1), 4, 4)
 
 h <- function(i) {
-  (x_prior[2,i])*(x_prior[1,i]) + x_prior[3,i]*data2$relativeimportpriceinflation[i+1] + x_prior[4,i]*data2$expect[i+1] + (1-x_prior[4,i])*data2$yoy_inflation[i+1]
+  (x_prior[2,i])*(x_prior[1,i]) + x_prior[3,i]*data2$relativeimportpriceinflation[i] + x_prior[4,i]*data2$expect[i] + (1-x_prior[4,i])*data2$yoy_inflation[i]
   }
 
 H <- function(i) {
-  t(c((x_prior[2,i]), (x_prior[1,i]), data2$relativeimportpriceinflation[i+1], (data2$expect[i+1]-data2$yoy_inflation[i+1])))
+  t(c((x_prior[2,i]), (x_prior[1,i]), data2$relativeimportpriceinflation[i], (data2$expect[i]-data2$yoy_inflation[i])))
 }
 
 #Extended Kalman filter recursions
-for (i in 1:(nrow(data2)-3)) {
+for (i in 1:(nrow(data2))) {
   
   #prediction step 
   x_prior[,i] <- F %*% x_post[,i]
   P_prior <- F %*% tcrossprod(P_post,F) + Q 
   
   #update step 
-  y <- data2$annualized_inflation[i+1]-h(i)
+  y <- data2$annualized_inflation[i]-h(i)
   S <- H(i) %*% tcrossprod(P_prior,H(i)) + R
   S_inv <- solve(S)
   K <- tcrossprod(P_prior,H(i)) %*% S_inv
   
-  # For tracking progress
-  if (y > variance_estimate_0) {
-    print(paste0("the estimated residual with value ",y," is larger than average initial shock variance at iteration ",data2$date[i+3]))
-    #y <- variance_estimate_0
-  }
+  # # For tracking progress
+  # if (y > variance_estimate_0) {
+  #   print(paste0("the estimated residual with value ",y," is larger than average initial shock variance at iteration ",data2$date[i+3]))
+  #   #y <- variance_estimate_0
+  # }
   
   
   x_post[,i+1] <- x_prior[,i] + K %*% y
@@ -359,7 +359,7 @@ for (i in 1:(nrow(data2)-3)) {
   
   if (x_post[2,i+1]<0 | x_post[3,i+1]<0 | x_post[4,i+1]<0 | x_post[4,i+1]>1) {
     
-    print(paste0("one of the constraints is binding at iteration ", i, " and time ",data2$date[i+3], " with values ",cat(x_post[,i+1],"\n",sep="\t")))
+    print(paste0("one of the constraints is binding at iteration ", i, " and time ",data2$date[i], " with values ",cat(x_post[,i+1],"\n",sep="\t")))
 
     
     #constraints for the quadratic optimization problem 
@@ -415,20 +415,20 @@ for (i in 1:(nrow(data2)-3)) {
   # 
 }
 
-#plotting results ####
+#preparing output ####
 
 #simple plot
-par(mfrow=c(2,2))
-plot(x_post[1,],type="line",sub ="unemployment gap",xlab = "",ylab = "")
-plot(x_post[2,],type="line",sub ="kappa",xlab = "",ylab = "")
-plot(x_post[3,],type="line",sub ="gamma",xlab = "",ylab = "")
-plot(x_post[4,],type="line",sub ="theta",xlab = "",ylab = "")
+# par(mfrow=c(2,2))
+# plot(x_post[1,],type="line",sub ="unemployment gap",xlab = "",ylab = "")
+# plot(x_post[2,],type="line",sub ="kappa",xlab = "",ylab = "")
+# plot(x_post[3,],type="line",sub ="gamma",xlab = "",ylab = "")
+# plot(x_post[4,],type="line",sub ="theta",xlab = "",ylab = "")
 
 #using ggplot and FRED recession bars 
 #convert matrix to a wide data frame, delete starting values (first row)
 x_post_data <- as.data.frame(t(x_post))
 x_post_data <- x_post_data[-1,]
-x_post_data$date <- c(as.character(data2$date[-(1:3)]))
+x_post_data$date <- c(as.character(data1$date))
 x_post_data$date <- as.Date(x_post_data$date, format="%Y-%m-%d")
 
 
@@ -482,6 +482,8 @@ recessions.df = read.table(textConnection(
   colClasses=c('Date', 'Date'), header=TRUE)
 
 recessions.trim = subset(recessions.df, Trough >= min(data1$date))
+
+#plotting results ####
 
 png(filename = here("1_Plots/NAIRU.png") , height=350, width=350)
 a <- ggplot(x_post_data) + geom_line( aes(x = date, y = NAIRU,group = 1),color='red') + theme_bw()
