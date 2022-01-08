@@ -61,6 +61,7 @@ qs(inflationexpectation0.seas)
 #there is no evidence of seasonality in the original and hence the time series is not adjusted
 
 #inflation ####
+
 # cpi$annualized_inflation <- NA
 # for (i in 5:nrow(cpi)) {
 #   cpi$annualized_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-3])/cpi$cpi[i-3])*100*4
@@ -357,9 +358,15 @@ for (i in 1:(nrow(data2))) {
   x_post[,i+1] <- x_prior[,i] + K %*% y
   P_post <- (diag(1,4,4) - K %*% H(i)) %*% P_prior
   
+  if (sum(P_post > Q)>0) {
+    print("blub")
+    P_post <- Q
+  }
+  
+  
   if (x_post[2,i+1]<0 | x_post[3,i+1]<0 | x_post[4,i+1]<0 | x_post[4,i+1]>1) {
     
-    print(paste0("one of the constraints is binding at iteration ", i, " and time ",data2$date[i], " with values ",cat(x_post[,i+1],"\n",sep="\t")))
+    #print(paste0("one of the constraints is binding at iteration ", i, " and time ",data2$date[i], " with values ",cat(x_post[,i+1],"\n",sep="\t")))
 
     
     #constraints for the quadratic optimization problem 
