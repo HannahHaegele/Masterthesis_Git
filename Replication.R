@@ -23,24 +23,21 @@ library(zoo)
 
 #covid dummy
 covid <- as.data.frame(read_csv(here('0_Data/phillips_corona.csv'))) %>%
-  select(c(covid,date,cpaltt01usm659n))
+  select(c(covid,date))
 
 #data unemployment (sa)
 unemployment <- read_csv(here('0_Data/UNRATE.csv')) %>%
   rename(unemp = UNRATE) 
-#inflation_expectation$expect <- as.numeric(expect)
 as.data.frame(unemployment)
 
 #data NAIRU (not sa)
 NAIRU <- read_csv(here('0_Data/NROU.csv')) %>%
   rename(NAIRU = NROU) 
-#NAIRU$NAIRU <- as.numeric(NAIRU$NAIRU)
 as.data.frame(NAIRU)
 
 #data inflation expectation (not sa)
 inflation_expectation <- read_csv(here('0_Data/EXPINF10YR.csv')) %>%
   rename(expect = EXPINF10YR, ) 
-#inflation_expectation$expect <- as.numeric(expect)
 as.data.frame(inflation_expectation)
 
 #data import price deflator (sa)
@@ -60,71 +57,71 @@ qs(inflationexpectation0.seas)
 
 #there is no evidence of seasonality in the original and hence the time series is not adjusted
 
-#inflation ####
+#estimating headline inflation  ####
 
-cpi$annualized_inflation <- NA
-for (i in 5:nrow(cpi)) {
-  cpi$annualized_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-3])/cpi$cpi[i-3])*100*4
-}
+#quarterly, annualized headline inflation 
+  cpi$annualized_inflation <- NA
+  for (i in 5:nrow(cpi)) {
+    cpi$annualized_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-3])/cpi$cpi[i-3])*100*4
+  }
 
-# cpi$annualized_inflation <- NA
-# for (i in 2:nrow(cpi)) {
-#   cpi$annualized_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-1])/cpi$cpi[i-1])*100*12
-# }
+#yoy inflation as average over past 12 months   
+  cpi$yoy_inflation <- NA
+  for (i in 13:nrow(cpi)) {
+    cpi$yoy_inflation[i] <- (cpi$annualized_inflation[i-1]+cpi$annualized_inflation[i-2]+cpi$annualized_inflation[i-3]+cpi$annualized_inflation[i-4]+
+                               cpi$annualized_inflation[i-5]+cpi$annualized_inflation[i-6]+cpi$annualized_inflation[i-7]+cpi$annualized_inflation[i-8]+
+                               cpi$annualized_inflation[i-9]+cpi$annualized_inflation[i-10]+cpi$annualized_inflation[i-11]+cpi$annualized_inflation[i-12])/12
+  }
 
+#monthly, annualized headline inflation   
+  # cpi$annualized_inflation <- NA
+  # for (i in 2:nrow(cpi)) {
+  #   cpi$annualized_inflation[i] <- ((cpi$cpi[i]-cpi$cpi[i-1])/cpi$cpi[i-1])*100*12
+  # }
 
-# e <- ggplot(cpi) + geom_line( aes(x = DATE, y = annualized_inflation,group = 1,color='red')) + theme_bw()
-# e + geom_line( aes(x = DATE, y = annualized_inflation1,group = 1,color='blue'))
+#comparison monthly and quarterly growth rates     
+  # e <- ggplot(cpi) + geom_line( aes(x = DATE, y = annualized_inflation,group = 1,color='red')) + theme_bw()
+  # e + geom_line( aes(x = DATE, y = annualized_inflation1,group = 1,color='blue'))
 
-# cpi$yoy_inflation <- NA
-# cpi$yoy_inflation <- (rollsumr(cpi$annualized_inflation, k = 12,fill=NA))/12
+#yoy inflation as average over past 4 quarters
+  # cpi$yoy_inflation <- NA
+  # for (i in 13:nrow(cpi)) {
+  #   cpi$yoy_inflation[i] <- (cpi$annualized_inflation[i-3]+cpi$annualized_inflation[i-6]+cpi$annualized_inflation[i-9]+cpi$annualized_inflation[i-12])/4
+  # }
+  
+#yoy inflation as yearly headline inflation 
+  # cpi$yoy_inflation1 <- NA
+  # for (i in 13:nrow(cpi)) {
+  #   cpi$yoy_inflation1[i] <- ((cpi$cpi[i]-cpi$cpi[i-12])/cpi$cpi[i-12])*100
+  # }
 
-# cpi$yoy_inflation <- NA
-# for (i in 13:nrow(cpi)) {
-#   cpi$yoy_inflation[i] <- (cpi$annualized_inflation[i-3]+cpi$annualized_inflation[i-6]+cpi$annualized_inflation[i-9]+cpi$annualized_inflation[i-12])/4
-# }
+#estimating import price inflation ####
 
-cpi$yoy_inflation <- NA
-for (i in 13:nrow(cpi)) {
-  cpi$yoy_inflation[i] <- (cpi$annualized_inflation[i-1]+cpi$annualized_inflation[i-2]+cpi$annualized_inflation[i-3]+cpi$annualized_inflation[i-4]+
-                            cpi$annualized_inflation[i-5]+cpi$annualized_inflation[i-6]+cpi$annualized_inflation[i-7]+cpi$annualized_inflation[i-8]+
-                            cpi$annualized_inflation[i-9]+cpi$annualized_inflation[i-10]+cpi$annualized_inflation[i-11]+cpi$annualized_inflation[i-12])/12
-}
-
-# cpi$yoy_inflation1 <- NA
-# for (i in 13:nrow(cpi)) {
-#   cpi$yoy_inflation1[i] <- ((cpi$cpi[i]-cpi$cpi[i-12])/cpi$cpi[i-12])*100
-# }
-
-# e <- ggplot(cpi) + geom_line( aes(x = DATE, y = yoy_inflation,group = 1,color='red')) + theme_bw()
-# e + geom_line( aes(x = DATE, y = yoy_inflation1,group = 1,color='blue'))
-
-#import price inflation ####
-
-#interpolation for monthly import deflator data 
-monthly = seq(importpricedeflator$DATE[1], tail(importpricedeflator$DATE,1), by="month")
-importpricedeflator2 <- data.frame(DATE=monthly, spline(importpricedeflator, method="fmm",xout = monthly)$y) 
-importpricedeflator <- merge(importpricedeflator, importpricedeflator2, by="DATE", all=TRUE) %>%
-  rename(IMPdef_monthly = spline.importpricedeflator..method....fmm...xout...monthly..y)
-
-#monthly growth rates (in percentage terms)
-# importpricedeflator$importpriceinflation  <- NA
-# for (i in 2:nrow(importpricedeflator)) {
-#   importpricedeflator$importpriceinflation[i] <- ((importpricedeflator$IMPdef_monthly[i]-importpricedeflator$IMPdef_monthly[i-1])/importpricedeflator$IMPdef_monthly[i-1])*100*12
-# }
-
-importpricedeflator$importpriceinflation <- NA
-for (i in 5:nrow(importpricedeflator)) {
-  importpricedeflator$importpriceinflation[i] <- ((importpricedeflator$IMPdef_monthly[i]-importpricedeflator$IMPdef_monthly[i-3])/importpricedeflator$IMPdef_monthly[i-3])*100*4
-}
-# 
-# e <- ggplot(importpricedeflator) + geom_line( aes(x = DATE, y = importpriceinflation,group = 1,color='red')) + theme_bw()
-# e + geom_line( aes(x = DATE, y = importpriceinflation1,group = 1,color='blue'))
-
-drop.cols <- c('IMPdef','IMPdef_monthly')
-importpricedeflator <- importpricedeflator %>% select(-one_of(drop.cols))
-
-
+  #interpolation for monthly import deflator data 
+  monthly = seq(importpricedeflator$DATE[1], tail(importpricedeflator$DATE,1), by="month")
+  importpricedeflator2 <- data.frame(DATE=monthly, spline(importpricedeflator, method="fmm",xout = monthly)$y) 
+  importpricedeflator <- merge(importpricedeflator, importpricedeflator2, by="DATE", all=TRUE) %>%
+    rename(IMPdef_monthly = spline.importpricedeflator..method....fmm...xout...monthly..y)
+  
+  #quarterly, annualized growth rates
+  importpricedeflator$importpriceinflation <- NA
+  for (i in 5:nrow(importpricedeflator)) {
+    importpricedeflator$importpriceinflation[i] <- ((importpricedeflator$IMPdef_monthly[i]-importpricedeflator$IMPdef_monthly[i-3])/importpricedeflator$IMPdef_monthly[i-3])*100*4
+  }
+  
+  #monthly, annualized growth rates
+  # importpricedeflator$importpriceinflation  <- NA
+  # for (i in 2:nrow(importpricedeflator)) {
+  #   importpricedeflator$importpriceinflation[i] <- ((importpricedeflator$IMPdef_monthly[i]-importpricedeflator$IMPdef_monthly[i-1])/importpricedeflator$IMPdef_monthly[i-1])*100*12
+  # }
+  
+  
+  #comparison of volatility of quarterly and monthly growth rates  
+  # e <- ggplot(importpricedeflator) + geom_line( aes(x = DATE, y = importpriceinflation,group = 1,color='red')) + theme_bw()
+  # e + geom_line( aes(x = DATE, y = importpriceinflation1,group = 1,color='blue'))
+  
+  drop.cols <- c('IMPdef','IMPdef_monthly')
+  importpricedeflator <- importpricedeflator %>% select(-one_of(drop.cols))
 
 #alternative for import price inflation ####
 #yields slighlty different results (but negative theta)
@@ -172,11 +169,6 @@ data1 <- relocate(data1, t)
 data1 <- as_tibble(data1)
 write_csv(data1, here('0_Data/model_input_data.csv'))
 
-data2 <- filter(data,date > "1981-12-01" & date < "2021-08-01")
-data2$t <- 1:nrow(data2) 
-data2 <- relocate(data2, t) 
-
-
 #scatter-plot COVID ####
 
 # ggplot(data=data, aes(x=unemp, y=annualized_inflation))+
@@ -187,7 +179,6 @@ data2 <- relocate(data2, t)
 # ggplot(data=data %>% filter(covid==1), aes(x=unemp, y=annualized_inflation))+
 #   geom_point()
 # dev.off()
-
 
 
 #linear regression ####
@@ -300,49 +291,49 @@ covariances_0  <- array(covariances_0, dim=c(4,4,i))
 covariances_0 <- apply(covariances_0 , c(1, 2), mean, na.rm = TRUE)
 
 #print output
-variances_coefficients_0
-variance_estimate_0
-variance_NAIRU
-covariances_0
+# variances_coefficients_0
+# variance_estimate_0
+# variance_NAIRU
+# covariances_0
 
 #EKF recursions ####
 
 #initialization (values, vectors, matrices) 
-s = 15 
-rho = 0.9 
-
-x_prior <- matrix(NA, nrow = 4, ncol = nrow(data2))
-x_post <- matrix(NA, nrow = 4, ncol = (nrow(data2)+1))
-x_post[,1] <- c(0,coefficients_0)
-
-Q <- covariances_0
-Q[1,] <- c(variance_NAIRU*s,0,0,0)
-Q[,1] <- c(variance_NAIRU*s,0,0,0)
-
-R <- variance_estimate_0 
-
-P_prior <- matrix(0, nrow = 4, ncol = 4)
-P_post <- matrix(0, nrow = 4, ncol = 4)
-
-F <- diag(c(rho,1,1,1), 4, 4)
-
-h <- function(i) {
-  (x_prior[2,i])*(x_prior[1,i]) + x_prior[3,i]*data2$relativeimportpriceinflation[i] + x_prior[4,i]*data2$expect[i] + (1-x_prior[4,i])*data2$yoy_inflation[i]
+  s = 15 
+  rho = 0.9 
+  
+  x_prior <- matrix(NA, nrow = 4, ncol = nrow(data1))
+  x_post <- matrix(NA, nrow = 4, ncol = (nrow(data1)+1))
+  x_post[,1] <- c(0,coefficients_0)
+  
+  Q <- covariances_0
+  Q[1,] <- c(variance_NAIRU*s,0,0,0)
+  Q[,1] <- c(variance_NAIRU*s,0,0,0)
+  
+  R <- variance_estimate_0 
+  
+  P_prior <- matrix(0, nrow = 4, ncol = 4)
+  P_post <- matrix(0, nrow = 4, ncol = 4)
+  
+  F <- diag(c(rho,1,1,1), 4, 4)
+  
+  h <- function(i) {
+    (x_prior[2,i])*(x_prior[1,i]) + x_prior[3,i]*data1$relativeimportpriceinflation[i] + x_prior[4,i]*data1$expect[i] + (1-x_prior[4,i])*data1$yoy_inflation[i]
+    }
+  
+  H <- function(i) {
+    t(c((x_prior[2,i]), (x_prior[1,i]), data1$relativeimportpriceinflation[i], (data1$expect[i]-data1$yoy_inflation[i])))
   }
 
-H <- function(i) {
-  t(c((x_prior[2,i]), (x_prior[1,i]), data2$relativeimportpriceinflation[i], (data2$expect[i]-data2$yoy_inflation[i])))
-}
-
 #recursions
-for (i in 1:(nrow(data2))) {
+for (i in 1:(nrow(data1))) {
   
   #prediction step 
   x_prior[,i] <- F %*% x_post[,i]
   P_prior <- F %*% tcrossprod(P_post,F) + Q 
   
   #update step 
-  y <- data2$annualized_inflation[i]-h(i)
+  y <- data1$annualized_inflation[i]-h(i)
   S <- H(i) %*% tcrossprod(P_prior,H(i)) + R
   S_inv <- solve(S)
   K <- tcrossprod(P_prior,H(i)) %*% S_inv
@@ -353,7 +344,7 @@ for (i in 1:(nrow(data2))) {
   #constraint 1 (adjustment of Kalman filter recursions when updated state vector does not satisfy inequality constraint)
   if (x_post[2,i+1]<0 | x_post[3,i+1]<0 | x_post[4,i+1]<0 | x_post[4,i+1]>1) {
     
-    print(paste0("one of the inequality constraints is binding at iteration ", i, " and time ",data2$date[i]))
+    print(paste0("one of the inequality constraints is binding at iteration ", i, " and time ",data1$date[i]))
 
     # lower-bounds 
     A.lbs <- rbind(c( 1, 0, 0, 0),
@@ -418,63 +409,63 @@ for (i in 1:(nrow(data2))) {
 #preparing output ####
 
 #convert matrix to a wide data frame
-x_post_data <- as.data.frame(t(x_post))
-x_post_data <- x_post_data[-1,]
+  x_post_data <- as.data.frame(t(x_post))
+  x_post_data <- x_post_data[-1,]
+  
+  x_post_data$date <- c(as.character(data1$date))
+  x_post_data$date <- as.Date(x_post_data$date, format="%Y-%m-%d")
+  
+  colnames(x_post_data) <- c("unemploymentgap","kappa","gamma","theta","date")
+  x_post_data$NAIRU <- (x_post_data$unemploymentgap - data1$unemp)*(-1)
+  x_post_data$unemp <- data1$unemp
+  x_post_data$annualizedinflation <- data1$annualized_inflation
+  x_post_data$yoy_inflation <- data1$yoy_inflation
 
-x_post_data$date <- c(as.character(data1$date))
-x_post_data$date <- as.Date(x_post_data$date, format="%Y-%m-%d")
-
-colnames(x_post_data) <- c("unemploymentgap","kappa","gamma","theta","date")
-x_post_data$NAIRU <- (x_post_data$unemploymentgap - data1$unemp)*(-1)
-x_post_data$unemp <- data1$unemp
-x_post_data$annualizedinflation <- data1$annualized_inflation
-x_post_data$yoy_inflation <- data1$yoy_inflation
-
-x_post_data$inflation <- c()
-for (i in 1:nrow(x_post_data)) {
-  x_post_data$inflation[i] <- (x_post_data[i,1])*(x_post_data[i,2]) + x_post_data[i,3]*data2$relativeimportpriceinflation[i] + x_post_data[i,4]*data2$expect[i] + (1-x_post_data[i,4])*data2$yoy_inflation[i]
-}
-
-#add recession dates for recession bars in plots (source: https://fredhelp.stlouisfed.org/fred/data/understanding-the-data/recession-bars/)
-recessions.df = read.table(textConnection(
-  "Peak, Trough
-1857-06-01, 1858-12-01
-1860-10-01, 1861-06-01
-1865-04-01, 1867-12-01
-1869-06-01, 1870-12-01
-1873-10-01, 1879-03-01
-1882-03-01, 1885-05-01
-1887-03-01, 1888-04-01
-1890-07-01, 1891-05-01
-1893-01-01, 1894-06-01
-1895-12-01, 1897-06-01
-1899-06-01, 1900-12-01
-1902-09-01, 1904-08-01
-1907-05-01, 1908-06-01
-1910-01-01, 1912-01-01
-1913-01-01, 1914-12-01
-1918-08-01, 1919-03-01
-1920-01-01, 1921-07-01
-1923-05-01, 1924-07-01
-1926-10-01, 1927-11-01
-1929-08-01, 1933-03-01
-1937-05-01, 1938-06-01
-1945-02-01, 1945-10-01
-1948-11-01, 1949-10-01
-1953-07-01, 1954-05-01
-1957-08-01, 1958-04-01
-1960-04-01, 1961-02-01
-1969-12-01, 1970-11-01
-1973-11-01, 1975-03-01
-1980-01-01, 1980-07-01
-1981-07-01, 1982-11-01
-1990-07-01, 1991-03-01
-2001-03-01, 2001-11-01
-2007-12-01, 2009-06-01
-2020-02-01, 2020-04-01"), sep=',',
-  colClasses=c('Date', 'Date'), header=TRUE)
-
-recessions.trim = subset(recessions.df, Trough >= min(data1$date))
+  x_post_data$inflation <- c()
+  for (i in 1:nrow(x_post_data)) {
+    x_post_data$inflation[i] <- (x_post_data[i,1])*(x_post_data[i,2]) + x_post_data[i,3]*data1$relativeimportpriceinflation[i] + x_post_data[i,4]*data1$expect[i] + (1-x_post_data[i,4])*data1$yoy_inflation[i]
+  }
+  
+  #add recession dates for recession bars in plots (source: https://fredhelp.stlouisfed.org/fred/data/understanding-the-data/recession-bars/)
+  recessions.df = read.table(textConnection(
+    "Peak, Trough
+  1857-06-01, 1858-12-01
+  1860-10-01, 1861-06-01
+  1865-04-01, 1867-12-01
+  1869-06-01, 1870-12-01
+  1873-10-01, 1879-03-01
+  1882-03-01, 1885-05-01
+  1887-03-01, 1888-04-01
+  1890-07-01, 1891-05-01
+  1893-01-01, 1894-06-01
+  1895-12-01, 1897-06-01
+  1899-06-01, 1900-12-01
+  1902-09-01, 1904-08-01
+  1907-05-01, 1908-06-01
+  1910-01-01, 1912-01-01
+  1913-01-01, 1914-12-01
+  1918-08-01, 1919-03-01
+  1920-01-01, 1921-07-01
+  1923-05-01, 1924-07-01
+  1926-10-01, 1927-11-01
+  1929-08-01, 1933-03-01
+  1937-05-01, 1938-06-01
+  1945-02-01, 1945-10-01
+  1948-11-01, 1949-10-01
+  1953-07-01, 1954-05-01
+  1957-08-01, 1958-04-01
+  1960-04-01, 1961-02-01
+  1969-12-01, 1970-11-01
+  1973-11-01, 1975-03-01
+  1980-01-01, 1980-07-01
+  1981-07-01, 1982-11-01
+  1990-07-01, 1991-03-01
+  2001-03-01, 2001-11-01
+  2007-12-01, 2009-06-01
+  2020-02-01, 2020-04-01"), sep=',',
+    colClasses=c('Date', 'Date'), header=TRUE)
+  
+  recessions.trim = subset(recessions.df, Trough >= min(data1$date))
 
 #plotting NAIRU/unemployment ####
 
@@ -511,6 +502,5 @@ e <- ggplot(x_post_data) + geom_line( aes(x = date, y = annualizedinflation,grou
 e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
     geom_line(aes(x = date, y = inflation,group = 1),color='blue')
 
-png(filename = here("1_Plots/parameters.png") , height=350, width=350)
-plot_grid(a, b, c, d, labels = "AUTO")
-dev.off()
+#plot_grid(a, b, c, d, labels = "AUTO")
+
