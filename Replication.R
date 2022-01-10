@@ -198,28 +198,76 @@ write_csv(data1, here('0_Data/model_input_data.csv'))
 # summary(reg)
 
 
+#ARMA errors ####
+
+reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
+
+reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,
+                                         constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+
+png(filename = here("1_Plots/acf.png") , height=350, width=350)
+plot(acf(reg$residuals))
+dev.off()
+
+png(filename = here("1_Plots/pcf.png") , height=350, width=350)
+plot(pacf(reg$residuals))
+dev.off()
+
+#choosing optimal number of lags for the ARMA model 
+#1 graphical approach 
+##ACF exhibits slow decay, PACF cuts off sharply after lag 7 -> AR(7)
+##ACF exhibits slow decay, PACF shows slow decay -> assessment of mixed ARMA much harder
+##either AR or ARMA model, not MA model 
+
+#2 approach based on AIC, BIC 
+
+reg1 <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(7, 0),
+                     constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+
+plot(acf(reg1$residuals))
+plot(pacf(reg1$residuals))
+reg1$aic
+
+reg2 <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(6, 0),
+                     constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+
+plot(acf(reg2$residuals))
+plot(pacf(reg2$residuals))
+reg2$aic
+
+reg3 <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(0, 1),
+                     constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+
+plot(acf(reg3$residuals))
+plot(pacf(reg3$residuals))
+reg3$aic
+
+#3 appraoch based on automated algorithm 
+##only available for ARIMA models, but not for ARMA models 
+auto.arima(residuals(reg))
+
 #rolling window regressions ####
 #if we have data on the full year 2021, then we would have 31 full rolling windows 
 #df=number observations - number of parameters (including intercept)
 # # 
-for (i in 1:31) {
-  data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
-
-  reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
-
-  reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,
-                 constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
-
-  X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
-
-  as.vector(assign(paste0("coefficients_", i), summary(reg)$coeff[1:4]))
-  as.vector(assign(paste0("variances_coefficients_", i), (summary(reg)$coeff[5:8])^2))
-
-  assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-4))
-
-  #variance-covariance matrices = sigma2*(X'X)^-1
-  assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-4)) * solve(crossprod(X)))
-}
+# for (i in 1:31) {
+#   data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
+# 
+#   reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
+# 
+#   reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,
+#                  constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+# 
+#   X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
+# 
+#   as.vector(assign(paste0("coefficients_", i), summary(reg)$coeff[1:4]))
+#   as.vector(assign(paste0("variances_coefficients_", i), (summary(reg)$coeff[5:8])^2))
+# 
+#   assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-4))
+# 
+#   #variance-covariance matrices = sigma2*(X'X)^-1
+#   assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-4)) * solve(crossprod(X)))
+# }
 
 # #average of all coefficients, their variances and the variance of the estimate (i.e. of the residuals/regression)
 # coefficients <- do.call(rbind, lapply( paste0("coefficients_", 1:31) , get) )
@@ -257,7 +305,7 @@ for (i in 1:31) {
   
   reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
   
-  reg <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(0, 1),
+  reg <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(7, 0),
                       constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
   
 
