@@ -202,25 +202,25 @@ write_csv(data1, here('0_Data/model_input_data.csv'))
 #if we have data on the full year 2021, then we would have 31 full rolling windows 
 #df=number observations - number of parameters (including intercept)
 # # 
-# for (i in 1:31) {
-#   data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
-# 
-#   reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
-# 
-#   reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,
-#                  constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
-# 
-#   X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
-# 
-#   as.vector(assign(paste0("coefficients_", i), summary(reg)$coeff[1:4]))
-#   as.vector(assign(paste0("variances_coefficients_", i), (summary(reg)$coeff[5:8])^2))
-# 
-#   assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-4))
-# 
-#   #variance-covariance matrices = sigma2*(X'X)^-1
-#   assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-4)) * solve(crossprod(X)))
-# }
-# 
+for (i in 1:31) {
+  data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
+
+  reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
+
+  reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,
+                 constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+
+  X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
+
+  as.vector(assign(paste0("coefficients_", i), summary(reg)$coeff[1:4]))
+  as.vector(assign(paste0("variances_coefficients_", i), (summary(reg)$coeff[5:8])^2))
+
+  assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-4))
+
+  #variance-covariance matrices = sigma2*(X'X)^-1
+  assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-4)) * solve(crossprod(X)))
+}
+
 # #average of all coefficients, their variances and the variance of the estimate (i.e. of the residuals/regression)
 # coefficients <- do.call(rbind, lapply( paste0("coefficients_", 1:31) , get) )
 # variances_coefficients <- do.call(rbind, lapply( paste0("variances_coefficients_", 1:31) , get) )
