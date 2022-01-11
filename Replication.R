@@ -312,12 +312,12 @@ for (i in 1:31) {
   X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
 
   as.vector(assign(paste0("coefficients_", i), summary(reg)$coeff[1:4]))
-  as.vector(assign(paste0("variances_coefficients_", i), (summary(reg)$coeff[5:8])^2))
+  #as.vector(assign(paste0("variances_coefficients_", i), (summary(reg)$coeff[5:8])^2))
 
-  assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-4))
+  assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-(reg$order[1]+4)))
 
   #variance-covariance matrices = sigma2*(X'X)^-1
-  assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-4)) * solve(crossprod(X)))
+  assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-(reg$order[1]+4))) * solve(crossprod(X)))
 }
 
 #average of all coefficients, their variances and the variance of the estimate (i.e. of the residuals/regression)
