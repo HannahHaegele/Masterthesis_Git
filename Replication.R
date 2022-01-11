@@ -198,6 +198,95 @@ write_csv(data1, here('0_Data/model_input_data.csv'))
 # summary(reg)
 
 
+#HAC sandwich errors ####
+#source by Achim Zeileis
+#https://cran.r-project.org/web/packages/sandwich/vignettes/sandwich-OOP.pdf
+#http://ftp.uni-bayreuth.de/math/statlib/R/CRAN/doc/vignettes/sandwich/sandwich.pdf
+
+reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data1)
+
+reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data1,
+               constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+
+#bread 
+X <- cbind(rep(1,nrow(data1)),data1$unemp,data1$relativeimportpriceinflation,data1$expect_yoy)
+bread <-  solve(crossprod(X)) * as.vector(nrow(data1))
+
+#estimating function 
+estfun <- function (obj, ...) {
+  wts <- weights(obj)
+  if(is.null(wts)) wts <- 1
+  as.vector(residuals(obj)) * wts * X
+}
+
+#meat (HAC estimator)
+
+#isotonic autocorrelation function 
+#returns decreasing autocorrelation function(decreasing autocorrelations are required to have decreasing weights in the HAC estimator)
+isoacf <- function(x) {
+  acfWeave <- function(x, lag = trunc(5*sqrt(length(x))))
+  {
+    x <- x - mean(x)
+    autocov <- function(ii, xx)
+      cov(xx[1:(length(xx)-ii+1)],xx[ii:length(xx)])
+    covs <- sapply(2:lag, autocov, xx = x)
+    covs/var(x)
+  }
+
+    lagmax <- length(x) - 1
+    lagmax <- min(length(x) - 1, lagmax)
+    covs <- as.vector(acf(x, lag.max = lagmax -1, plot = FALSE)$acf)[-1]
+    rval <- c(1, -isoreg(1:(length(covs)+1), c(-covs, 0))$yf)
+
+  return(rval)
+}
+
+#weights for the HAC estimator are estimated following Lumley and Heagerty (1999) 
+#adaptive weighting scheme where the weights are chosen based on the estimated autocorrelations of the residuals
+weightsLumley <- function(x,method = c("truncate", "smooth"), acf = isoacf, tol = 1e-7, data = list(), ...) {
+  method <- match.arg(method)
+  res <- residuals(x) 
+  n <- length(res)
+
+  index <- 1:n
+  res <- res[index]
+  
+  rhohat <- acf(res)
+  
+  switch(method,
+  "truncate" = {
+  C <- 4
+  lag <- max((1:length(rhohat))[rhohat^2*n > C])
+  weights <- rep(1, lag)
+  },
+  "smooth" = {
+  C <- 1
+  weights <- C * n * rhohat^2
+  weights <- ifelse(weights > 1, 1, weights)
+  weights <- weights[1:max(which(abs(weights) > tol))]
+  })
+  
+  return(weights)
+}
+
+meat <- function(obj, weights, ...) {
+  psi <- estfun(obj)
+  n <- nrow(psi)
+  
+  rval <- 0.5 * crossprod(psi) * weights[1]
+  
+  for(i in 2:length(weights)) {
+    rval <- rval + weights[i] * crossprod(psi[1:(n-i+1),], psi[i:n,])
+  }
+  
+  (rval + t(rval))/n
+}
+
+meat <- meat(reg,weightsLumley(reg))
+
+#sandwich 
+1/nrow(estfun(reg)) * (bread %*% meat %*% bread)
+
 #ARMA errors ####
 
 reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
@@ -257,8 +346,10 @@ print(paste0("The AIC-optimal MA lag is ",ceiling(which.min(AIC)/(max.q+1)-1), "
 # 
 #   assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-4))
 # 
-#   #variance-covariance matrices = sigma2*(X'X)^-1
-#   assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-4)) * solve(crossprod(X)))
+#   #variance-covariance matrices: sigma2*(X'X)^-1 and HAC sandwich estimation 
+#   #assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-4)) * solve(crossprod(X)))
+#   assign(paste0("covariance_matrix_", i), 1/nrow(estfun(reg)) * (bread %*% meat %*% bread))
+#   
 # }
 
 # #average of all coefficients, their variances and the variance of the estimate (i.e. of the residuals/regression)
