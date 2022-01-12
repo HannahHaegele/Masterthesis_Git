@@ -269,7 +269,8 @@ weightsLumley <- function(x,method = c("truncate", "smooth"), acf = isoacf, tol 
   return(weights)
 }
 
-mt <- function(obj, weights, ...) {
+#using Lumleys weights 
+mt1 <- function(obj, weights, ...) {
   psi <- estfun(obj)
   n <- nrow(psi)
   
@@ -281,6 +282,24 @@ mt <- function(obj, weights, ...) {
   
   (rval + t(rval))/n
 }
+
+#using NeweyWest weights with lag set to the heuristic m=integer part of (samplesize^1/4)
+mt <- function(obj,...) {
+  psi <- estfun(obj)
+  n <- nrow(psi)
+  
+  lag <- floor(nrow(data)^1/4)
+  weights <- seq(1, 0, by = -(1/(lag + 1)))
+  
+  rval <- 0.5 * crossprod(psi) * weights[1]
+  
+  for(i in 2:length(weights)) {
+    rval <- rval + weights[i] * crossprod(psi[1:(n-i+1),], psi[i:n,])
+  }
+  
+  (rval + t(rval))/n
+}
+
 
 #meat <- meat(reg,weightsLumley(reg))
 
@@ -331,8 +350,6 @@ print(paste0("The AIC-optimal MA lag is ",ceiling(which.min(AIC)/(max.q+1)-1), "
 #if we have data on the full year 2021, then we would have 31 full rolling windows
 #df=number observations - number of parameters (including intercept)
 # #
-i=1
-ARMA = FALSE 
 for (i in 1:31) {
    data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
 
@@ -346,8 +363,10 @@ for (i in 1:31) {
    as.vector(assign(paste0("coefficients_", i), summary(reg)$coeff[1:4]))
    #as.vector(assign(paste0("variances_coefficients_", i), (summary(reg)$coeff[5:8])^2))
 
-   rho_res <- suppressWarnings(as.numeric(unlist(acf(reg$residuals))))[2]
-   assign(paste0("variance_estimate_", i), (sum(reg$residuals^2)/(nrow(data)-4))/(1-rho_res^2))
+   #rho_res <- suppressWarnings(as.numeric(unlist(acf(reg$residuals))))[2]
+   #assign(paste0("variance_estimate_", i), (sum(reg$residuals^2)/(nrow(data)-4))/(1-rho_res^2))
+   
+   assign(paste0("variance_estimate_", i), (sum(reg$residuals^2)/(nrow(data)-4)))
 
    #variance-covariance matrices: sigma2*(X'X)^-1 and HAC sandwich estimation
    #assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-4)) * solve(crossprod(X)))
@@ -377,7 +396,6 @@ for (i in 1:31) {
  covariances_0 <- apply(covariances_0 , c(1, 2), mean, na.rm = TRUE)
 
 #rolling window regressions with ARMA errors ####
- ARMA = TRUE 
  for (i in 1:31) {
    data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
    reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
