@@ -356,7 +356,7 @@ for (i in 1:31) {
    reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
 
    reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,
-                  constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+                  constraints ='unemp < 0,relativeimportpriceinflation > 0,expect_yoy > 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
 
    X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
 
@@ -372,7 +372,7 @@ for (i in 1:31) {
    #assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-4)) * solve(crossprod(X)))
    
    bread <-  solve(crossprod(X)) * as.vector(nrow(data))
-   meat <- mt(reg,weightsLumley(reg))
+   meat <- mt(reg)
    assign(paste0("covariance_matrix_", i), 1/nrow(estfun(reg)) * (bread %*% meat %*% bread))
 
  }
@@ -400,7 +400,7 @@ for (i in 1:31) {
    data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
    reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
    reg <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(11, 2),
-                       constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+                       constraints ='unemp < 0,relativeimportpriceinflation > 0,expect_yoy > 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
 
 
    X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
@@ -408,19 +408,19 @@ for (i in 1:31) {
    as.vector(assign(paste0("coefficients_", i), summary(reg)$coeff[1:4]))
    #as.vector(assign(paste0("variances_coefficients_", i), (summary(reg)$coeff[5:8])^2))
 
-   assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-(reg$order[1]+4)))
+   assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-(reg$order[1]+reg$order[2]+4)))
 
    #variance-covariance matrices = sigma2*(X'X)^-1
-   assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-(reg$order[1]+4))) * solve(crossprod(X)))
+   assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-(reg$order[1]+reg$order[2]+4))) * solve(crossprod(X)))
  }
 
  #average of all coefficients, their variances and the variance of the estimate (i.e. of the residuals/regression)
  coefficients <- do.call(rbind, lapply( paste0("coefficients_", 1:31) , get) )
  coefficients[,2] <- (-1)*coefficients[,2]
- variances_coefficients <- do.call(rbind, lapply( paste0("variances_coefficients_", 1:31) , get) )
+ #variances_coefficients <- do.call(rbind, lapply( paste0("variances_coefficients_", 1:31) , get) )
 
  coefficients_0 <- as.vector(colMeans(coefficients))[2:4]
- variances_coefficients_0 <- as.vector(colMeans(variances_coefficients))[2:4]
+ #variances_coefficients_0 <- as.vector(colMeans(variances_coefficients))[2:4]
 
  variance_estimate <- do.call(rbind, lapply( paste0("variance_estimate_", 1:31) , get) )
  variance_estimate_0 <- as.vector(colMeans(variance_estimate))
@@ -460,11 +460,11 @@ for (i in 1:31) {
   F <- diag(c(rho,1,1,1), 4, 4)
   
   h <- function(i) {
-    (x_prior[2,i])*(x_prior[1,i]) + x_prior[3,i]*data1$relativeimportpriceinflation[i] + x_prior[4,i]*data1$expect[i] + (1-x_prior[4,i])*data1$yoy_inflation[i]
+    -(x_prior[2,i])*(x_prior[1,i]) + x_prior[3,i]*data1$relativeimportpriceinflation[i] + x_prior[4,i]*data1$expect[i] + (1-x_prior[4,i])*data1$yoy_inflation[i]
     }
   
   H <- function(i) {
-    t(c((x_prior[2,i]), (x_prior[1,i]), data1$relativeimportpriceinflation[i], (data1$expect[i]-data1$yoy_inflation[i])))
+    t(c(-(x_prior[2,i]), -(x_prior[1,i]), data1$relativeimportpriceinflation[i], (data1$expect[i]-data1$yoy_inflation[i])))
   }
 
 #recursions
@@ -565,7 +565,7 @@ for (i in 1:(nrow(data1))) {
 
   x_post_data$inflation <- c()
   for (i in 1:nrow(x_post_data)) {
-    x_post_data$inflation[i] <- (x_post_data[i,1])*(x_post_data[i,2]) + x_post_data[i,3]*data1$relativeimportpriceinflation[i] + x_post_data[i,4]*data1$expect[i] + (1-x_post_data[i,4])*data1$yoy_inflation[i]
+    x_post_data$inflation[i] <- (x_post_data[i,1])*(-x_post_data[i,2]) + x_post_data[i,3]*data1$relativeimportpriceinflation[i] + x_post_data[i,4]*data1$expect[i] + (1-x_post_data[i,4])*data1$yoy_inflation[i]
   }
   
   #add recession dates for recession bars in plots (source: https://fredhelp.stlouisfed.org/fred/data/understanding-the-data/recession-bars/)
