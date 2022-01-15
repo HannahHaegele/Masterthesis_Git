@@ -454,8 +454,14 @@ for (i in 1:31) {
   
   R <- variance_estimate_0 
   
-  P_prior <- matrix(0, nrow = 4, ncol = 4)
-  P_post <- matrix(0, nrow = 4, ncol = 4)
+  #P_prior <- matrix(0, nrow = 4, ncol = 4)
+  #P_post <- matrix(0, nrow = 4, ncol = 4)
+  
+  P_prior <- array(0, dim = c(4,4,nrow(data1)))
+  P_post <- array(0, dim = c(4,4,nrow(data1)+1))
+  
+  P_post[,,1] <- matrix(0, nrow = 4, ncol = 4)
+  
   
   F <- diag(c(rho,1,1,1), 4, 4)
   
@@ -467,21 +473,21 @@ for (i in 1:31) {
     t(c(-(x_prior[2,i]), -(x_prior[1,i]), data1$relativeimportpriceinflation[i], (data1$expect[i]-data1$yoy_inflation[i])))
   }
 
-#recursions
+#Step 1: forward recursions
 for (i in 1:(nrow(data1))) {
   
   #prediction step 
   x_prior[,i] <- F %*% x_post[,i]
-  P_prior <- F %*% tcrossprod(P_post,F) + Q 
+  P_prior[,,i] <- F %*% tcrossprod(P_post[,,i],F) + Q 
   
   #update step 
   y <- data1$annualized_inflation[i]-h(i)
-  S <- H(i) %*% tcrossprod(P_prior,H(i)) + R
+  S <- H(i) %*% tcrossprod(P_prior[,,i],H(i)) + R
   S_inv <- solve(S)
-  K <- tcrossprod(P_prior,H(i)) %*% S_inv
+  K <- tcrossprod(P_prior[,,i],H(i)) %*% S_inv
   
   x_post[,i+1] <- x_prior[,i] + K %*% y
-  P_post <- (diag(1,4,4) - K %*% H(i)) %*% P_prior
+  P_post[,,i+1] <- (diag(1,4,4) - K %*% H(i)) %*% P_prior[,,i]
   
   #constraint 1 (adjustment of Kalman filter recursions when updated state vector does not satisfy inequality constraint)
   if (x_post[2,i+1]<0 | x_post[3,i+1]<0 | x_post[4,i+1]<0 | x_post[4,i+1]>1) {
@@ -508,7 +514,7 @@ for (i in 1:(nrow(data1))) {
     #representation in quadratic programming form  
     Dmat <- matrix(0,4,4)
     
-    P_post_inv <- solve(P_post)
+    P_post_inv <- solve(P_post[,,i+1])
     diag(Dmat) <- diag(P_post_inv)*2
     
     Dmat[lower.tri(Dmat)] <- c(P_post_inv[1,2]+P_post_inv[2,1], P_post_inv[1,3]+P_post_inv[3,1],P_post_inv[1,4]+P_post_inv[4,1],P_post_inv[2,3]+P_post_inv[3,2],P_post_inv[2,4]+P_post_inv[4,2],P_post_inv[3,4]+P_post_inv[4,3])
@@ -533,20 +539,32 @@ for (i in 1:(nrow(data1))) {
   
   #constraint 2 (deviation of ML estimates of shock variances relative to initial estimates obtained from rolling regressions)
   #assumed that the logical order of these constraints is this way, could possibly be the other way round? 
-  if (sum(diag(P_post) > diag(Q))>0) {
+  if (sum(diag(P_post[,,i+1]) > diag(Q))>0) {
     print(paste0("ML estimates of shock variances are larger than initial estimates obtained from rolling regressions at iteration ",i))
-    P_post <- Q
+    P_post[,,i+1] <- Q
   }
+}  
   
-  # #control of quadratic programming representation 
-  # constante <- (-x_post[,i+1] %*% P_post_inv[,1]) %*% (-x_post[1,i+1]) +
-  #   (-x_post[,i+1] %*% P_post_inv[,2]) %*% (-x_post[2,i+1]) +
-  #   (-x_post[,i+1] %*% P_post_inv[,3]) %*% (-x_post[3,i+1]) +
-  #   (-x_post[,i+1] %*% P_post_inv[,4]) %*% (-x_post[4,i+1]) 
-  # 
-  # abs(t(solve.QP(Dmat,dvec,Amat,bvec=bvec)$solution-x_post[,i+1]) %*% P_post_inv %*% (solve.QP(Dmat,dvec,Amat,bvec=bvec)$solution-x_post[,i+1]) - constante - solve.QP(Dmat,dvec,Amat,bvec=bvec)$value) < 1e-8
-  # 
-}
+#Step2: backward recursions
+
+  x_post_smooth <- matrix(NA, nrow = 4, ncol = (nrow(data1)-1))
+  P_post_smooth <- array(0, dim = c(4,4,nrow(data1)))
+
+  #Start at t = T-1
+  i <- nrow(data1)-1
+
+  L <- P_post[,,i+1] %*% t(F) %*% solve(P_prior[,,i+1])
+  x_post_smooth[,i] <- x_post[,i+1] + L %*% (x_post[,i+2] - x_prior[,i+1])
+  P_post_smooth[,,i] <- P_post[,,i+1] + L %*% (P_post[,,i+2] - P_prior[,,i+1]) %*% t(L)
+
+  #Continue for t = T-2,T-3,...,0
+   for (i in (nrow(data1)-2):1) {
+
+   L <- P_post[,,i+1] %*% crossprod(F,solve(P_prior[,,i+1]))
+   x_post_smooth[,i] <- x_post[,i+1] + L %*% (x_post_smooth[,i+1] - x_prior[,i+1])
+   P_post_smooth[,,i] <- P_post[,,i+1] + L %*% (P_post_smooth[,,i+1] - P_prior[,,i+1]) %*% t(L)
+
+   }
 
 #preparing output ####
 
@@ -566,6 +584,23 @@ for (i in 1:(nrow(data1))) {
   x_post_data$inflation <- c()
   for (i in 1:nrow(x_post_data)) {
     x_post_data$inflation[i] <- (x_post_data[i,1])*(-x_post_data[i,2]) + x_post_data[i,3]*data1$relativeimportpriceinflation[i] + x_post_data[i,4]*data1$expect[i] + (1-x_post_data[i,4])*data1$yoy_inflation[i]
+  }
+  
+#smooth data  
+  x_post_smooth_data <- as.data.frame(t(x_post_smooth))
+  
+  x_post_smooth_data$date <- c(as.character(data1$date))[-(length(data1$date))]
+  x_post_smooth_data$date <- as.Date(x_post_smooth_data$date, format="%Y-%m-%d")
+  
+  colnames(x_post_smooth_data) <- c("unemploymentgap","kappa","gamma","theta","date")
+  x_post_smooth_data$NAIRU <- (x_post_smooth_data$unemploymentgap - data1$unemp[-(length(data1$date))])*(-1)
+  x_post_smooth_data$unemp <- data1$unemp[-(length(data1$date))]
+  x_post_smooth_data$annualizedinflation <- data1$annualized_inflation[-(length(data1$date))]
+  x_post_smooth_data$yoy_inflation <- data1$yoy_inflation[-(length(data1$date))]
+  
+  x_post_smooth_data$inflation <- c()
+  for (i in 1:nrow(x_post_smooth_data)) {
+    x_post_smooth_data$inflation[i] <- (x_post_smooth_data[i,1])*(-x_post_smooth_data[i,2]) + x_post_smooth_data[i,3]*data1$relativeimportpriceinflation[i] + x_post_smooth_data[i,4]*data1$expect[i] + (1-x_post_smooth_data[i,4])*data1$yoy_inflation[i]
   }
   
   #add recession dates for recession bars in plots (source: https://fredhelp.stlouisfed.org/fred/data/understanding-the-data/recession-bars/)
@@ -616,9 +651,23 @@ a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=
     geom_line(aes(x = date, y = unemp,group = 1,colour='unemployment rate')) +
     scale_colour_manual(" ", values = c("NAIRU" ="red", "unemployment"="blue")) 
 
+a <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = NAIRU,group = 1,colour='NAIRU')) + theme_bw()
+a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
+  geom_line(aes(x = date, y = unemp,group = 1,colour='unemployment rate')) +
+  scale_colour_manual(" ", values = c("NAIRU" ="red", "unemployment"="blue")) 
+
+#plotting upgap #### 
+
+a <- ggplot(x_post_data) + geom_line( aes(x = date, y = unemploymentgap,group = 1)) + theme_bw()
+a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+
+
 #plotting kappa ####
 
 b <- ggplot(x_post_data) + geom_line( aes(x = date, y = kappa,group = 1)) + theme_bw()
+b + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+
+b <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = kappa,group = 1)) + theme_bw()
 b + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 
 #plotting gamma #####
@@ -626,17 +675,28 @@ b + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=
 c <- ggplot(x_post_data) + geom_line( aes(x = date, y = gamma,group = 1)) + theme_bw()
 c + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 
+c <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = gamma,group = 1)) + theme_bw()
+c + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+
 #plotting theta #####
 
 d <- ggplot(x_post_data) + geom_line( aes(x = date, y = theta,group = 1)) + theme_bw()
 d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+
+d <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = theta,group = 1)) + theme_bw()
+d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+
 
 #plotting predicted/actual inflation #####
 e <- ggplot(x_post_data) + geom_line( aes(x = date, y = annualizedinflation,group = 1,colour='actual inflation')) + theme_bw()
 e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
     geom_line(aes(x = date, y = inflation,group = 1,colour='predicted inflation')) + 
     scale_colour_manual(" ", values = c("actual inflation" ="red", "predicted inflation"="blue")) 
-#plot_grid(a, b, c, d, labels = "AUTO")
+
+e <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = annualizedinflation,group = 1,colour='actual inflation')) + theme_bw()
+e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
+  geom_line(aes(x = date, y = inflation,group = 1,colour='predicted inflation')) + 
+  scale_colour_manual(" ", values = c("actual inflation" ="red", "predicted inflation"="blue")) 
 
 
 #save plots ARMA ####
@@ -664,6 +724,35 @@ e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=
   dev.off()
   
   png(filename = here("1_Plots/fit.png") , height=350, width=350)
+  e <- ggplot(x_post_data) + geom_line( aes(x = date, y = annualizedinflation,group = 1,colour='actual inflation')) + theme_bw()
+  e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
+    geom_line(aes(x = date, y = inflation,group = 1,colour='predicted inflation')) + 
+    scale_colour_manual(" ", values = c("actual inflation" ="red", "predicted inflation"="blue")) 
+  dev.off()
+  
+  png(filename = here("1_Plots/NAIRU_smooth.png") , height=350, width=350)
+  a <- ggplot(x_post_data) + geom_line( aes(x = date, y = NAIRU,group = 1,colour='NAIRU')) + theme_bw()
+  a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
+    geom_line(aes(x = date, y = unemp,group = 1,colour='unemployment rate')) +
+    scale_colour_manual(" ", values = c("NAIRU" ="red", "unemployment"="blue")) 
+  dev.off()
+  
+  png(filename = here("1_Plots/kappa_smooth.png") , height=350, width=350)
+  b <- ggplot(x_post_data) + geom_line( aes(x = date, y = kappa,group = 1)) + theme_bw()
+  b + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+  dev.off()
+  
+  png(filename = here("1_Plots/gamma_smooth.png") , height=350, width=350)
+  c <- ggplot(x_post_data) + geom_line( aes(x = date, y = gamma,group = 1)) + theme_bw()
+  c + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+  dev.off()
+  
+  png(filename = here("1_Plots/theta_smooth.png") , height=350, width=350)
+  d <- ggplot(x_post_data) + geom_line( aes(x = date, y = theta,group = 1)) + theme_bw()
+  d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+  dev.off()
+  
+  png(filename = here("1_Plots/fit_smooth.png") , height=350, width=350)
   e <- ggplot(x_post_data) + geom_line( aes(x = date, y = annualizedinflation,group = 1,colour='actual inflation')) + theme_bw()
   e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
     geom_line(aes(x = date, y = inflation,group = 1,colour='predicted inflation')) + 
