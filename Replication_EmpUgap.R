@@ -1,3 +1,4 @@
+
 #preamble ####
 rm(list = ls())
 options(scipen = 999)
@@ -145,7 +146,7 @@ data1 <- as_tibble(data1)
 write_csv(data1, here('0_Data/model_input_data.csv'))
 
 #ARMA errors ####
-#yields ARMA(1,3) or ARMA(1,2)
+#yields ARMA(1,3) or ARMA(1,2) or ARMA(2,3) or ARMA(2,2)
 AIC = c()
 max.q=12 
 max.p=12
@@ -156,7 +157,7 @@ for(q in 0:max.q){
   for(p in 0:max.p){
     
     reg <- ConsRegArima(annualized_inflation~ugap+relativeimportpriceinflation+expect_yoy,data=data,order = c(p, q),
-                        constraints ='ugap <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+                        constraints ='ugap < 0,relativeimportpriceinflation > 0,expect_yoy > 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
     
     AIC[index] <- reg$aic
     index <- index + 1
@@ -174,7 +175,7 @@ print(paste0("The AIC-optimal MA lag is ",ceiling(which.min(AIC)/(max.q+1)-1), "
 for (i in 1:31) {
   data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
   reg0 <- lm(annualized_inflation~ugap+relativeimportpriceinflation+expect_yoy,data=data)
-  reg <- ConsRegArima(annualized_inflation~ugap+relativeimportpriceinflation+expect_yoy,data=data,order = c(1, 3),
+  reg <- ConsRegArima(annualized_inflation~ugap+relativeimportpriceinflation+expect_yoy,data=data,order = c(2, 2),
                       constraints ='ugap < 0,relativeimportpriceinflation > 0,expect_yoy > 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
   
   
@@ -308,17 +309,22 @@ Q <- covariances_0[-1,-1]
 
 R <- variance_estimate_0 
 
-P_prior <- matrix(0, nrow = 3, ncol = 3)
-P_post <- matrix(0, nrow = 3, ncol = 3)
+P_prior <- array(0, dim = c(3,3,nrow(data1)))
+P_post <- array(0, dim = c(3,3,nrow(data1)+1))
+
+P_post[,,1] <- matrix(0, nrow = 3, ncol = 3)
 
 F <- diag(c(1,1,1), 3, 3)
+#H <- function(i) {
+  #t(c(-(data1$ugap[i]), data1$relativeimportpriceinflation[i], (data1$expect[i]-data1$yoy_inflation[i])))
+#}
 
 h <- function(i) {
   -(x_prior[1,i])*(data1$ugap[i]) + x_prior[2,i]*data1$relativeimportpriceinflation[i] + x_prior[3,i]*data1$expect[i] + (1-x_prior[3,i])*data1$yoy_inflation[i]
 }
 
 H <- function(i) {
-  t(c(-(data1$ugap[i]), data1$relativeimportpriceinflation[i], (data1$expect[i]-data1$yoy_inflation[i])))
+  t(c(-data1$ugap[i], data1$relativeimportpriceinflation[i], (data1$expect[i]-data1$yoy_inflation[i])))
 }
 
 #recursions
@@ -326,16 +332,17 @@ for (i in 1:(nrow(data1))) {
   
   #prediction step 
   x_prior[,i] <- F %*% x_post[,i]
-  P_prior <- F %*% tcrossprod(P_post,F) + Q 
+  P_prior[,,i] <- F %*% tcrossprod(P_post[,,i],F) + Q 
   
   #update step 
   y <- data1$annualized_inflation[i]-h(i)
-  S <- H(i) %*% tcrossprod(P_prior,H(i)) + R
+  S <- H(i) %*% tcrossprod(P_prior[,,i],H(i)) + R
   S_inv <- solve(S)
-  K <- tcrossprod(P_prior,H(i)) %*% S_inv
+  K <- tcrossprod(P_prior[,,i],H(i)) %*% S_inv
   
   x_post[,i+1] <- x_prior[,i] + K %*% y
-  P_post <- (diag(1,3,3) - K %*% H(i)) %*% P_prior
+  P_post[,,i+1] <- (diag(1,3,3) - K %*% H(i)) %*% P_prior[,,i]
+  
   
   #constraint 1 (adjustment of Kalman filter recursions when updated state vector does not satisfy inequality constraint)
   if (x_post[1,i+1]<0 | x_post[2,i+1]<0 | x_post[3,i+1]<0 | x_post[3,i+1]>1) {
@@ -360,7 +367,7 @@ for (i in 1:(nrow(data1))) {
     #representation in quadratic programming form  
     Dmat <- matrix(0,3,3)
     
-    P_post_inv <- solve(P_post)
+    P_post_inv <- solve(P_post[,,i+1])
     diag(Dmat) <- diag(P_post_inv)*2
     
     Dmat[lower.tri(Dmat)] <- c(P_post_inv[1,2]+P_post_inv[2,1], P_post_inv[1,3]+P_post_inv[3,1],P_post_inv[2,3]+P_post_inv[3,2])
@@ -383,9 +390,9 @@ for (i in 1:(nrow(data1))) {
   
   #constraint 2 (deviation of ML estimates of shock variances relative to initial estimates obtained from rolling regressions)
   #assumed that the logical order of these constraints is this way, could possibly be the other way round? 
-  if (sum(diag(P_post) > diag(Q))>0) {
+  if (sum(diag(P_post[,,i+1]) > diag(Q))>0) {
     #print(paste0("ML estimates of shock variances are larger than initial estimates obtained from rolling regressions at iteration ",i))
-    P_post <- Q
+    P_post[,,i+1] <- Q 
   }
   
   # #control of quadratic programming representation 
@@ -396,6 +403,27 @@ for (i in 1:(nrow(data1))) {
   # 
   # abs(t(solve.QP(Dmat,dvec,Amat,bvec=bvec)$solution-x_post[,i+1]) %*% P_post_inv %*% (solve.QP(Dmat,dvec,Amat,bvec=bvec)$solution-x_post[,i+1]) - constante - solve.QP(Dmat,dvec,Amat,bvec=bvec)$value) < 1e-8
   # 
+}
+
+#Step2: backward recursions
+
+x_post_smooth <- matrix(NA, nrow = 3, ncol = (nrow(data1)-1))
+P_post_smooth <- array(0, dim = c(3,3,nrow(data1)))
+
+#Start at t = T-1
+i <- nrow(data1)-1
+
+L <- P_post[,,i+1] %*% t(F) %*% solve(P_prior[,,i+1])
+x_post_smooth[,i] <- x_post[,i+1] + L %*% (x_post[,i+2] - x_prior[,i+1])
+P_post_smooth[,,i] <- P_post[,,i+1] + L %*% (P_post[,,i+2] - P_prior[,,i+1]) %*% t(L)
+
+#Continue for t = T-2,T-3,...,0
+for (i in (nrow(data1)-2):1) {
+  
+  L <- P_post[,,i+1] %*% crossprod(F,solve(P_prior[,,i+1]))
+  x_post_smooth[,i] <- x_post[,i+1] + L %*% (x_post_smooth[,i+1] - x_prior[,i+1])
+  P_post_smooth[,,i] <- P_post[,,i+1] + L %*% (P_post_smooth[,,i+1] - P_prior[,,i+1]) %*% t(L)
+  
 }
 
 #preparing output ####
@@ -414,6 +442,24 @@ x_post_data$yoy_inflation <- data1$yoy_inflation
 x_post_data$inflation <- c()
 for (i in 1:nrow(x_post_data)) {
   x_post_data$inflation[i] <- -(x_post_data[i,1])*data1$ugap[i] + x_post_data[i,2]*data1$relativeimportpriceinflation[i] + x_post_data[i,3]*data1$expect[i] + (1-x_post_data[i,3])*data1$yoy_inflation[i]
+}
+
+#smooth data  
+x_post_smooth_data <- as.data.frame(t(x_post_smooth))
+
+x_post_smooth_data$date <- c(as.character(data1$date))[-(length(data1$date))]
+x_post_smooth_data$date <- as.Date(x_post_smooth_data$date, format="%Y-%m-%d")
+
+colnames(x_post_smooth_data) <- c("kappa","gamma","theta","date")
+x_post_smooth_data$NAIRU <- (x_post_smooth_data$unemploymentgap - data1$unemp[-(length(data1$date))])*(-1)
+x_post_smooth_data$unemp <- data1$unemp[-(length(data1$date))]
+x_post_smooth_data$annualizedinflation <- data1$annualized_inflation[-(length(data1$date))]
+x_post_smooth_data$yoy_inflation <- data1$yoy_inflation[-(length(data1$date))]
+x_post_smooth_data$ugap <- data1$ugap[-(length(data1$date))]
+
+x_post_smooth_data$inflation <- c()
+for (i in 1:nrow(x_post_smooth_data)) {
+  x_post_smooth_data$inflation[i] <- -(x_post_smooth_data[i,1])*data1$ugap + x_post_smooth_data[i,2]*data1$relativeimportpriceinflation[i] + x_post_smooth_data[i,3]*data1$expect[i] + (1-x_post_smooth_data[i,3])*data1$yoy_inflation[i]
 }
 
 #add recession dates for recession bars in plots (source: https://fredhelp.stlouisfed.org/fred/data/understanding-the-data/recession-bars/)
@@ -462,14 +508,23 @@ recessions.trim = subset(recessions.df, Trough >= min(data1$date))
 b <- ggplot(x_post_data) + geom_line( aes(x = date, y = kappa,group = 1)) + theme_bw()
 b + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 
+b <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = kappa,group = 1)) + theme_bw()
+b + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+
 #plotting gamma #####
 
 c <- ggplot(x_post_data) + geom_line( aes(x = date, y = gamma,group = 1)) + theme_bw()
 c + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 
+c <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = gamma,group = 1)) + theme_bw()
+c + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+
 #plotting theta #####
 
 d <- ggplot(x_post_data) + geom_line( aes(x = date, y = theta,group = 1)) + theme_bw()
+d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+
+d <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = theta,group = 1)) + theme_bw()
 d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 
 #plotting predicted/actual inflation #####
@@ -502,6 +557,7 @@ e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=
   geom_line(aes(x = date, y = inflation,group = 1,colour='predicted inflation')) + 
   scale_colour_manual(" ", values = c("actual inflation" ="red", "predicted inflation"="blue")) 
 dev.off()
+
 
 
 

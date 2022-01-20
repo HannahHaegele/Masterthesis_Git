@@ -35,6 +35,13 @@ NAIRU <- read_csv(here('0_Data/NROU.csv')) %>%
   rename(NAIRU = NROU) 
 as.data.frame(NAIRU)
 
+monthly = seq(NAIRU$DATE[1], tail(NAIRU$DATE,1), by="month")
+NAIRU2 <- data.frame(DATE=monthly, spline(NAIRU, method="fmm",xout = monthly)$y) 
+NAIRU <- merge(NAIRU, NAIRU2, by="DATE", all=TRUE) %>%
+  select(c(DATE,spline.NAIRU..method....fmm...xout...monthly..y)) %>%
+  rename(NAIRU = spline.NAIRU..method....fmm...xout...monthly..y)
+
+
 #data inflation expectation (not sa)
 inflation_expectation <- read_csv(here('0_Data/EXPINF10YR.csv')) %>%
   rename(expect = EXPINF10YR, ) 
@@ -156,9 +163,10 @@ data <- merge(unemployment,inflation_expectation,by.x = "DATE", by.y = "DATE", a
   merge(covid,by.x = "DATE", by.y = "date", all.x = TRUE) %>%
   mutate(expect_yoy = expect-yoy_inflation) %>%
   mutate(relativeimportpriceinflation = importpriceinflation-annualized_inflation) %>%
+  mutate(ugap = unemp-NAIRU) %>%
   rename(date = DATE) %>%
   relocate(covid, .after = date) %>%
-  select(c(date,covid,unemp,expect,importpriceinflation,NAIRU,annualized_inflation,yoy_inflation,expect_yoy,relativeimportpriceinflation))
+  select(c(date,covid,unemp,expect,importpriceinflation,NAIRU,annualized_inflation,yoy_inflation,expect_yoy,relativeimportpriceinflation,ugap))
 
 
 #subset of sample that contains data for all variables (expected inflation)
@@ -311,7 +319,7 @@ mt <- function(obj,...) {
 reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
 
 reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,
-                                         constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+                                         constraints ='unemp < 0,relativeimportpriceinflation > 0,expect_yoy > 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
 
 png(filename = here("1_Plots/acf.png") , height=350, width=350)
 plot(acf(reg$residuals))
@@ -322,7 +330,7 @@ plot(pacf(reg$residuals))
 dev.off()
 
 #choosing optimal number of lags for the ARMA model 
-#yields (often) ARMA(11,2)
+#yields ARMA(1,3), ARMA(4,2), ARMA(4,3)
 AIC = c()
 max.q=12 
 max.p=12
@@ -333,7 +341,7 @@ for(q in 0:max.q){
   for(p in 0:max.p){
     
     reg <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(p, q),
-                        constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+                        constraints ='unemp < 0,relativeimportpriceinflation > 0,expect_yoy > 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
     
     AIC[index] <- reg$aic
     index <- index + 1
@@ -399,7 +407,7 @@ for (i in 1:31) {
  for (i in 1:31) {
    data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
    reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
-   reg <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(11, 2),
+   reg <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(4, 3),
                        constraints ='unemp < 0,relativeimportpriceinflation > 0,expect_yoy > 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
 
 
@@ -412,6 +420,9 @@ for (i in 1:31) {
 
    #variance-covariance matrices = sigma2*(X'X)^-1
    assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-(reg$order[1]+reg$order[2]+4))) * solve(crossprod(X)))
+   
+   #as.vector(assign(paste0("variance_NAIRU_", i), var(data$NAIRU,na.rm = TRUE)))
+   
  }
 
  #average of all coefficients, their variances and the variance of the estimate (i.e. of the residuals/regression)
@@ -426,6 +437,8 @@ for (i in 1:31) {
  variance_estimate_0 <- as.vector(colMeans(variance_estimate))
 
  variance_NAIRU <- var(data1$NAIRU,na.rm = TRUE)
+ #variance_NAIRU <- do.call(rbind, lapply( paste0("variance_NAIRU_", 1:31) , get) )
+ #variance_NAIRU <- as.vector(colMeans(variance_NAIRU))
 
  #average of all variance-covariance matrices
  covariances_0 <- do.call(cbind, lapply( paste0("covariance_matrix_", 1:i) , get))
@@ -442,7 +455,7 @@ for (i in 1:31) {
 
 #initialization (values, vectors, matrices) 
   s = 15 
-  rho = 0.9 
+  rho = 0.9
   
   x_prior <- matrix(NA, nrow = 4, ncol = nrow(data1))
   x_post <- matrix(NA, nrow = 4, ncol = (nrow(data1)+1))
@@ -580,6 +593,7 @@ for (i in 1:(nrow(data1))) {
   x_post_data$unemp <- data1$unemp
   x_post_data$annualizedinflation <- data1$annualized_inflation
   x_post_data$yoy_inflation <- data1$yoy_inflation
+  x_post_data$ugap <- data1$ugap
 
   x_post_data$inflation <- c()
   for (i in 1:nrow(x_post_data)) {
@@ -597,6 +611,7 @@ for (i in 1:(nrow(data1))) {
   x_post_smooth_data$unemp <- data1$unemp[-(length(data1$date))]
   x_post_smooth_data$annualizedinflation <- data1$annualized_inflation[-(length(data1$date))]
   x_post_smooth_data$yoy_inflation <- data1$yoy_inflation[-(length(data1$date))]
+  x_post_smooth_data$ugap <- data1$ugap[-(length(data1$date))]
   
   x_post_smooth_data$inflation <- c()
   for (i in 1:nrow(x_post_smooth_data)) {
@@ -649,17 +664,19 @@ for (i in 1:(nrow(data1))) {
 a <- ggplot(x_post_data) + geom_line( aes(x = date, y = NAIRU,group = 1,colour='NAIRU')) + theme_bw()
 a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
     geom_line(aes(x = date, y = unemp,group = 1,colour='unemployment rate')) +
-    scale_colour_manual(" ", values = c("NAIRU" ="red", "unemployment"="blue")) 
+    scale_colour_manual(" ", values = c("NAIRU" ="red", "unemployment rate"="blue")) 
 
 a <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = NAIRU,group = 1,colour='NAIRU')) + theme_bw()
 a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
   geom_line(aes(x = date, y = unemp,group = 1,colour='unemployment rate')) +
-  scale_colour_manual(" ", values = c("NAIRU" ="red", "unemployment"="blue")) 
+  scale_colour_manual(" ", values = c("NAIRU" ="red", "unemployment rate"="blue")) 
 
 #plotting upgap #### 
 
-a <- ggplot(x_post_data) + geom_line( aes(x = date, y = unemploymentgap,group = 1)) + theme_bw()
-a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
+a <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = unemploymentgap,group = 1,colour='predicted ugap')) + theme_bw()
+a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
+  geom_line(aes(x = date, y = ugap,group = 1,colour='empirical ugap')) +
+  scale_colour_manual(" ", values = c("predicted ugap" ="red", "empirical ugap"="blue"))
 
 
 #plotting kappa ####
