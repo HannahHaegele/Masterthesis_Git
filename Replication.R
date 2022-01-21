@@ -18,6 +18,7 @@ library(cowplot)
 library(forecast)
 library(lmtest)
 library(zoo)
+library(ggrepel) #used for labeling scatter plot covid
 
 #read in data ####
 
@@ -35,11 +36,12 @@ NAIRU <- read_csv(here('0_Data/NROU.csv')) %>%
   rename(NAIRU = NROU) 
 as.data.frame(NAIRU)
 
-monthly = seq(NAIRU$DATE[1], tail(NAIRU$DATE,1), by="month")
-NAIRU2 <- data.frame(DATE=monthly, spline(NAIRU, method="fmm",xout = monthly)$y) 
-NAIRU <- merge(NAIRU, NAIRU2, by="DATE", all=TRUE) %>%
-  select(c(DATE,spline.NAIRU..method....fmm...xout...monthly..y)) %>%
-  rename(NAIRU = spline.NAIRU..method....fmm...xout...monthly..y)
+  #interpolation of NAIRU 
+  monthly = seq(NAIRU$DATE[1], tail(NAIRU$DATE,1), by="month")
+  NAIRU2 <- data.frame(DATE=monthly, spline(NAIRU, method="fmm",xout = monthly)$y) 
+  NAIRU <- merge(NAIRU, NAIRU2, by="DATE", all=TRUE) %>%
+    select(c(DATE,spline.NAIRU..method....fmm...xout...monthly..y)) %>%
+    rename(NAIRU = spline.NAIRU..method....fmm...xout...monthly..y)
 
 
 #data inflation expectation (not sa)
@@ -55,14 +57,6 @@ importpricedeflator <- as.data.frame(read_csv(here('0_Data/A255RD3Q086SBEA.csv')
 cpi <- read_csv(here('0_Data/CPALTT01USM661S.csv')) %>%
   rename(cpi = CPALTT01USM661S) 
 as.data.frame(cpi)
-
-#testing inflation expectation ts for seasonal adjustment ####
-
-inflationexpectation0<-ts(inflation_expectation[,-1],frequency=12,start=c(1982,1))
-inflationexpectation0.seas<-seas(inflationexpectation0)
-qs(inflationexpectation0.seas)
-
-#there is no evidence of seasonality in the original and hence the time series is not adjusted
 
 #estimating headline inflation  ####
 
@@ -130,30 +124,6 @@ qs(inflationexpectation0.seas)
   drop.cols <- c('IMPdef','IMPdef_monthly')
   importpricedeflator <- importpricedeflator %>% select(-one_of(drop.cols))
 
-#alternative for import price inflation ####
-#yields slighlty different results (but negative theta)
-
-
-#quarterly growth rates
-# importpricedeflator$quarterly_importpriceinflation <- NA
-# for (i in 2:nrow(importpricedeflator)) {
-#   importpricedeflator$quarterly_importpriceinflation[i] <- (importpricedeflator$IMPdef[i]-importpricedeflator$IMPdef[i-1])/importpricedeflator$IMPdef[i-1]*100
-# }
-# 
-# #annualized growth rates
-# importpricedeflator$importpriceinflation1 <- importpricedeflator$quarterly_importpriceinflation*4
-# 
-# drop.cols <- c('IMPdef','quarterly_importpriceinflation')
-# importpricedeflator <- importpricedeflator %>% select(-one_of(drop.cols))
-# 
-# #interpolation for monthly growth rates
-# monthly = seq(importpricedeflator$DATE[1], tail(importpricedeflator$DATE,1), by="month")
-# importpricedeflator2 <- data.frame(DATE=monthly, spline(importpricedeflator, method="fmm",xout = monthly)$y)
-# importpricedeflator <- merge(importpricedeflator, importpricedeflator2, by="DATE", all=TRUE) %>%
-#   rename(importpriceinflation = spline.importpricedeflator..method....fmm...xout...monthly..y)
-# 
-
-
 #merge and transform data ####
 
 data <- merge(unemployment,inflation_expectation,by.x = "DATE", by.y = "DATE", all.x = TRUE)  %>%
@@ -168,6 +138,7 @@ data <- merge(unemployment,inflation_expectation,by.x = "DATE", by.y = "DATE", a
   relocate(covid, .after = date) %>%
   select(c(date,covid,unemp,expect,importpriceinflation,NAIRU,annualized_inflation,yoy_inflation,expect_yoy,relativeimportpriceinflation,ugap))
 
+  write_csv(data, here('0_Data/model_input_data.csv'))
 
 #subset of sample that contains data for all variables (expected inflation)
 data1 <- filter(data,date > "1981-12-01" & date < "2021-08-01")
@@ -175,162 +146,11 @@ data1$t <- 1:nrow(data1)
 data1 <- relocate(data1, t) 
 
 data1 <- as_tibble(data1)
-write_csv(data1, here('0_Data/model_input_data.csv'))
+write_csv(data1, here('0_Data/model_input_data_1982.csv'))
 
-#scatter-plot COVID ####
+#identifying ARMA model based on AIC ####
 
-# ggplot(data=data, aes(x=unemp, y=annualized_inflation))+
-#   geom_point()
-# 
-# 
-# png(filename = here("1_Plots/Correlation_Covid.png") , height=350, width=350)
-# ggplot(data=data %>% filter(covid==1), aes(x=unemp, y=annualized_inflation))+
-#   geom_point()
-# dev.off()
-
-
-#linear regression ####
-#sample: 1982-2021
-# reg <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data1)
-# summary(reg)
-# vcov(reg)
-# 
-# # 
-# # #regression with unemployment gap, using empirical NAIRU
-# # unempgap <- data1$unemp-data1$NAIRU
-# # reg <- lm(annualized_inflation~unempgap+relativeimportpriceinflation+expect_yoy,data=data1)
-# # summary(reg)
-# # 
-# reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data1,
-#                constraints ='unemp < 0,relativeimportpriceinflation > 0,expect_yoy > 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(3.5,-0.5,0.1,0.2))
-# summary(reg)
-
-
-#HAC sandwich errors ####
-#source by Achim Zeileis
-#https://cran.r-project.org/web/packages/sandwich/vignettes/sandwich-OOP.pdf
-#http://ftp.uni-bayreuth.de/math/statlib/R/CRAN/doc/vignettes/sandwich/sandwich.pdf
-
-#reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data1)
-
-#reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data1,
-#              constraints ='unemp <= 0,relativeimportpriceinflation >= 0,expect_yoy >= 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
-
-#bread 
-#X <- cbind(rep(1,nrow(data1)),data1$unemp,data1$relativeimportpriceinflation,data1$expect_yoy)
-#bread <-  solve(crossprod(X)) * as.vector(nrow(data1))
-
-#estimating function 
-estfun <- function (obj, ...) {
-  wts <- weights(obj)
-  if(is.null(wts)) wts <- 1
-  as.vector(residuals(obj)) * wts * X
-}
-
-#meat (HAC estimator)
-
-#isotonic autocorrelation function 
-#returns decreasing autocorrelation function(decreasing autocorrelations are required to have decreasing weights in the HAC estimator)
-isoacf <- function(x) {
-  acfWeave <- function(x, lag = trunc(5*sqrt(length(x))))
-  {
-    x <- x - mean(x)
-    autocov <- function(ii, xx)
-      cov(xx[1:(length(xx)-ii+1)],xx[ii:length(xx)])
-    covs <- sapply(2:lag, autocov, xx = x)
-    covs/var(x)
-  }
-
-    lagmax <- length(x) - 1
-    lagmax <- min(length(x) - 1, lagmax)
-    covs <- as.vector(acf(x, lag.max = lagmax -1, plot = FALSE)$acf)[-1]
-    rval <- c(1, -isoreg(1:(length(covs)+1), c(-covs, 0))$yf)
-
-  return(rval)
-}
-
-#weights for the HAC estimator are estimated following Lumley and Heagerty (1999) 
-#adaptive weighting scheme where the weights are chosen based on the estimated autocorrelations of the residuals
-weightsLumley <- function(x,method = c("truncate", "smooth"), acf = isoacf, tol = 1e-7, data = list(), ...) {
-  method <- match.arg(method)
-  res <- residuals(x) 
-  n <- length(res)
-
-  index <- 1:n
-  res <- res[index]
-  
-  rhohat <- acf(res)
-  
-  switch(method,
-  "truncate" = {
-  C <- 4
-  lag <- max((1:length(rhohat))[rhohat^2*n > C])
-  weights <- rep(1, lag)
-  },
-  "smooth" = {
-  C <- 1
-  weights <- C * n * rhohat^2
-  weights <- ifelse(weights > 1, 1, weights)
-  weights <- weights[1:max(which(abs(weights) > tol))]
-  })
-  
-  return(weights)
-}
-
-#using Lumleys weights 
-mt1 <- function(obj, weights, ...) {
-  psi <- estfun(obj)
-  n <- nrow(psi)
-  
-  rval <- 0.5 * crossprod(psi) * weights[1]
-  
-  for(i in 2:length(weights)) {
-    rval <- rval + weights[i] * crossprod(psi[1:(n-i+1),], psi[i:n,])
-  }
-  
-  (rval + t(rval))/n
-}
-
-#using NeweyWest weights with lag set to the heuristic m=integer part of (samplesize^1/4)
-mt <- function(obj,...) {
-  psi <- estfun(obj)
-  n <- nrow(psi)
-  
-  lag <- floor(nrow(data)^1/4)
-  weights <- seq(1, 0, by = -(1/(lag + 1)))
-  
-  rval <- 0.5 * crossprod(psi) * weights[1]
-  
-  for(i in 2:length(weights)) {
-    rval <- rval + weights[i] * crossprod(psi[1:(n-i+1),], psi[i:n,])
-  }
-  
-  (rval + t(rval))/n
-}
-
-
-#meat <- meat(reg,weightsLumley(reg))
-
-#sandwich 
-#1/nrow(estfun(reg)) * (bread %*% meat %*% bread)
-
-#ARMA errors ####
-
-reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
-
-reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,
-                                         constraints ='unemp < 0,relativeimportpriceinflation > 0,expect_yoy > 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
-
-png(filename = here("1_Plots/acf.png") , height=350, width=350)
-plot(acf(reg$residuals))
-dev.off()
-
-png(filename = here("1_Plots/pcf.png") , height=350, width=350)
-plot(pacf(reg$residuals))
-dev.off()
-
-#choosing optimal number of lags for the ARMA model 
-#yields ARMA(1,3), ARMA(4,2), ARMA(4,3)
+#due to MCMC optimization in ConsRegArima, this loop yields different results for ARMA models, e.g. ARMA(1,3), ARMA(4,2), ARMA(4,3)
 AIC = c()
 max.q=12 
 max.p=12
@@ -354,106 +174,45 @@ a <- ceiling(which.min(AIC)/(max.q+1)-1)
 print(paste0("The AIC-optimal MA lag is ",ceiling(which.min(AIC)/(max.q+1)-1), " and the corresponding AR lag is ",which.min(AIC)-((a*(max.q+1)+1)))) 
 
 
-#rolling window regressions ####
-#if we have data on the full year 2021, then we would have 31 full rolling windows
-#df=number observations - number of parameters (including intercept)
-# #
-for (i in 1:31) {
-   data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
-
-   reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
-
-   reg <- ConsReg(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,
-                  constraints ='unemp < 0,relativeimportpriceinflation > 0,expect_yoy > 0',optimizer='mcmc',family='gaussian',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
-
-   X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
-
-   as.vector(assign(paste0("coefficients_", i), summary(reg)$coeff[1:4]))
-   #as.vector(assign(paste0("variances_coefficients_", i), (summary(reg)$coeff[5:8])^2))
-
-   #rho_res <- suppressWarnings(as.numeric(unlist(acf(reg$residuals))))[2]
-   #assign(paste0("variance_estimate_", i), (sum(reg$residuals^2)/(nrow(data)-4))/(1-rho_res^2))
-   
-   assign(paste0("variance_estimate_", i), (sum(reg$residuals^2)/(nrow(data)-4)))
-
-   #variance-covariance matrices: sigma2*(X'X)^-1 and HAC sandwich estimation
-   #assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-4)) * solve(crossprod(X)))
-   
-   bread <-  solve(crossprod(X)) * as.vector(nrow(data))
-   meat <- mt(reg)
-   assign(paste0("covariance_matrix_", i), 1/nrow(estfun(reg)) * (bread %*% meat %*% bread))
-
- }
-
- #average of all coefficients, their variances and the variance of the estimate (i.e. of the residuals/regression)
- coefficients <- do.call(rbind, lapply( paste0("coefficients_", 1:31) , get) )
- coefficients[,2] <- (-1)*coefficients[,2]
- #variances_coefficients <- do.call(rbind, lapply( paste0("variances_coefficients_", 1:31) , get) )
-
- coefficients_0 <- as.vector(colMeans(coefficients))[2:4]
- #variances_coefficients_0 <- as.vector(colMeans(variances_coefficients))[2:4]
-
- variance_estimate <- do.call(rbind, lapply( paste0("variance_estimate_", 1:31) , get) )
- variance_estimate_0 <- as.vector(colMeans(variance_estimate))
-
- variance_NAIRU <- var(data1$NAIRU,na.rm = TRUE)
-
- #average of all variance-covariance matrices
- covariances_0 <- do.call(cbind, lapply( paste0("covariance_matrix_", 1:i) , get))
- covariances_0  <- array(covariances_0, dim=c(4,4,i))
- covariances_0 <- apply(covariances_0 , c(1, 2), mean, na.rm = TRUE)
 
 #rolling window regressions with ARMA errors ####
- for (i in 1:31) {
-   data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
-   reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data)
-   reg <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(4, 3),
-                       constraints ='unemp < 0,relativeimportpriceinflation > 0,expect_yoy > 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
+for (i in 1:31) {
+  
+  #10 year rolling window regressions
+  data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
+  reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data) 
+  reg <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(4, 3),
+                      constraints ='unemp < 0,relativeimportpriceinflation > 0,expect_yoy > 0',optimizer='mcmc',ini.pars.coef = c(reg0$coeff[1],-0.5,0.1,0.2))
 
+  
+  X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy) #design matrix of regression model 
+  
+  #store coefficient estimates, sigma2 as well as variance-covariance matrices (sigma2*(X'X)^-1) for each rolling window 
+  as.vector(assign(paste0("coefficients_", i), summary(reg)$coeff[1:4]))
+  assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-(reg$order[1]+reg$order[2]+4)))
+  assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-(reg$order[1]+reg$order[2]+4))) * solve(crossprod(X)))
+  
+}
 
-   X <- cbind(rep(1,nrow(data)),data$unemp,data$relativeimportpriceinflation,data$expect_yoy)
+#take the average of r.w. results: coefficient estimates, sigma2 as well as variance-covariance matrices
 
-   as.vector(assign(paste0("coefficients_", i), summary(reg)$coeff[1:4]))
-   #as.vector(assign(paste0("variances_coefficients_", i), (summary(reg)$coeff[5:8])^2))
+coefficients <- do.call(rbind, lapply( paste0("coefficients_", 1:31) , get) )
+coefficients[,2] <- (-1)*coefficients[,2] #multiply by -1 to get positive value for kappa 
+coefficients_0 <- as.vector(colMeans(coefficients))[2:4]
 
-   assign(paste0("variance_estimate_", i), sum(reg$residuals^2)/(nrow(data)-(reg$order[1]+reg$order[2]+4)))
+variance_estimate <- do.call(rbind, lapply( paste0("variance_estimate_", 1:31) , get) )
+variance_estimate_0 <- as.vector(colMeans(variance_estimate))
 
-   #variance-covariance matrices = sigma2*(X'X)^-1
-   assign(paste0("covariance_matrix_", i), (sum(reg$residuals^2)/(nrow(data)-(reg$order[1]+reg$order[2]+4))) * solve(crossprod(X)))
-   
-   #as.vector(assign(paste0("variance_NAIRU_", i), var(data$NAIRU,na.rm = TRUE)))
-   
- }
+covariances_0 <- do.call(cbind, lapply( paste0("covariance_matrix_", 1:i) , get))
+covariances_0  <- array(covariances_0, dim=c(4,4,i))
+covariances_0 <- apply(covariances_0 , c(1, 2), mean, na.rm = TRUE)
 
- #average of all coefficients, their variances and the variance of the estimate (i.e. of the residuals/regression)
- coefficients <- do.call(rbind, lapply( paste0("coefficients_", 1:31) , get) )
- coefficients[,2] <- (-1)*coefficients[,2]
- #variances_coefficients <- do.call(rbind, lapply( paste0("variances_coefficients_", 1:31) , get) )
+variance_NAIRU <- var(data1$NAIRU,na.rm = TRUE)
 
- coefficients_0 <- as.vector(colMeans(coefficients))[2:4]
- #variances_coefficients_0 <- as.vector(colMeans(variances_coefficients))[2:4]
-
- variance_estimate <- do.call(rbind, lapply( paste0("variance_estimate_", 1:31) , get) )
- variance_estimate_0 <- as.vector(colMeans(variance_estimate))
-
- variance_NAIRU <- var(data1$NAIRU,na.rm = TRUE)
- #variance_NAIRU <- do.call(rbind, lapply( paste0("variance_NAIRU_", 1:31) , get) )
- #variance_NAIRU <- as.vector(colMeans(variance_NAIRU))
-
- #average of all variance-covariance matrices
- covariances_0 <- do.call(cbind, lapply( paste0("covariance_matrix_", 1:i) , get))
- covariances_0  <- array(covariances_0, dim=c(4,4,i))
- covariances_0 <- apply(covariances_0 , c(1, 2), mean, na.rm = TRUE)
-
-#print output
-# variances_coefficients_0
-# variance_estimate_0
-# variance_NAIRU
-# covariances_0
 
 #EKF recursions ####
 
-#initialization (values, vectors, matrices) 
+#initialization
   s = 15 
   rho = 0.9
   
@@ -467,14 +226,12 @@ for (i in 1:31) {
   
   R <- variance_estimate_0 
   
-  #P_prior <- matrix(0, nrow = 4, ncol = 4)
-  #P_post <- matrix(0, nrow = 4, ncol = 4)
-  
   P_prior <- array(0, dim = c(4,4,nrow(data1)))
   P_post <- array(0, dim = c(4,4,nrow(data1)+1))
   
-  P_post[,,1] <- matrix(0, nrow = 4, ncol = 4)
-  
+  #P_post[,,1] <- matrix(0, nrow = 4, ncol = 4)
+  #P_post[,,1] <- diag(nrow = 4, ncol = 4)
+  P_post[,,1] <- Q
   
   F <- diag(c(rho,1,1,1), 4, 4)
   
@@ -486,6 +243,7 @@ for (i in 1:31) {
     t(c(-(x_prior[2,i]), -(x_prior[1,i]), data1$relativeimportpriceinflation[i], (data1$expect[i]-data1$yoy_inflation[i])))
   }
 
+  
 #Step 1: forward recursions
 for (i in 1:(nrow(data1))) {
   
@@ -505,8 +263,6 @@ for (i in 1:(nrow(data1))) {
   #constraint 1 (adjustment of Kalman filter recursions when updated state vector does not satisfy inequality constraint)
   if (x_post[2,i+1]<0 | x_post[3,i+1]<0 | x_post[4,i+1]<0 | x_post[4,i+1]>1) {
     
-    print(paste0("one of the inequality constraints is binding at iteration ", i, " and time ",data1$date[i]))
-
     # lower-bounds 
     A.lbs <- rbind(c( 1, 0, 0, 0),
                    c( 0, 1, 0, 0),
@@ -581,7 +337,7 @@ for (i in 1:(nrow(data1))) {
 
 #preparing output ####
 
-#convert matrix to a wide data frame
+#data for filtered estimates
   x_post_data <- as.data.frame(t(x_post))
   x_post_data <- x_post_data[-1,]
   
@@ -600,7 +356,7 @@ for (i in 1:(nrow(data1))) {
     x_post_data$inflation[i] <- (x_post_data[i,1])*(-x_post_data[i,2]) + x_post_data[i,3]*data1$relativeimportpriceinflation[i] + x_post_data[i,4]*data1$expect[i] + (1-x_post_data[i,4])*data1$yoy_inflation[i]
   }
   
-#smooth data  
+#data for smoothed estimates  
   x_post_smooth_data <- as.data.frame(t(x_post_smooth))
   
   x_post_smooth_data$date <- c(as.character(data1$date))[-(length(data1$date))]
@@ -618,7 +374,7 @@ for (i in 1:(nrow(data1))) {
     x_post_smooth_data$inflation[i] <- (x_post_smooth_data[i,1])*(-x_post_smooth_data[i,2]) + x_post_smooth_data[i,3]*data1$relativeimportpriceinflation[i] + x_post_smooth_data[i,4]*data1$expect[i] + (1-x_post_smooth_data[i,4])*data1$yoy_inflation[i]
   }
   
-  #add recession dates for recession bars in plots (source: https://fredhelp.stlouisfed.org/fred/data/understanding-the-data/recession-bars/)
+  #recession dates for recession bars in plots (source: https://fredhelp.stlouisfed.org/fred/data/understanding-the-data/recession-bars/)
   recessions.df = read.table(textConnection(
     "Peak, Trough
   1857-06-01, 1858-12-01
@@ -661,11 +417,13 @@ for (i in 1:(nrow(data1))) {
 
 #plotting NAIRU/unemployment ####
 
+#filtered estimates 
 a <- ggplot(x_post_data) + geom_line( aes(x = date, y = NAIRU,group = 1,colour='NAIRU')) + theme_bw()
 a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
     geom_line(aes(x = date, y = unemp,group = 1,colour='unemployment rate')) +
     scale_colour_manual(" ", values = c("NAIRU" ="red", "unemployment rate"="blue")) 
 
+#smoothed estimates 
 a <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = NAIRU,group = 1,colour='NAIRU')) + theme_bw()
 a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
   geom_line(aes(x = date, y = unemp,group = 1,colour='unemployment rate')) +
@@ -673,6 +431,7 @@ a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=
 
 #plotting upgap #### 
 
+#smoothed estimates 
 a <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = unemploymentgap,group = 1,colour='predicted ugap')) + theme_bw()
 a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
   geom_line(aes(x = date, y = ugap,group = 1,colour='empirical ugap')) +
@@ -681,40 +440,48 @@ a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=
 
 #plotting kappa ####
 
+#filtered estimates 
 b <- ggplot(x_post_data) + geom_line( aes(x = date, y = kappa,group = 1)) + theme_bw()
 b + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 
+#smoothed estimates 
 b <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = kappa,group = 1)) + theme_bw()
 b + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 
 #plotting gamma #####
 
+#filtered estimates 
 c <- ggplot(x_post_data) + geom_line( aes(x = date, y = gamma,group = 1)) + theme_bw()
 c + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 
+#smoothed estimates 
 c <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = gamma,group = 1)) + theme_bw()
 c + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 
 #plotting theta #####
 
+#filtered estimates 
 d <- ggplot(x_post_data) + geom_line( aes(x = date, y = theta,group = 1)) + theme_bw()
 d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 
+#smoothed estimates 
 d <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = theta,group = 1)) + theme_bw()
 d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
 
 
 #plotting predicted/actual inflation #####
+
+#filtered estimates 
 e <- ggplot(x_post_data) + geom_line( aes(x = date, y = annualizedinflation,group = 1,colour='actual inflation')) + theme_bw()
 e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
     geom_line(aes(x = date, y = inflation,group = 1,colour='predicted inflation')) + 
     scale_colour_manual(" ", values = c("actual inflation" ="red", "predicted inflation"="blue")) 
 
+#smoothed estimates 
 e <- ggplot(x_post_smooth_data) + geom_line( aes(x = date, y = annualizedinflation,group = 1,colour='actual inflation')) + theme_bw()
 e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
   geom_line(aes(x = date, y = inflation,group = 1,colour='predicted inflation')) + 
   scale_colour_manual(" ", values = c("actual inflation" ="red", "predicted inflation"="blue")) 
-
 
 #save plots ARMA ####
   
@@ -775,37 +542,3 @@ e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=
     geom_line(aes(x = date, y = inflation,group = 1,colour='predicted inflation')) + 
     scale_colour_manual(" ", values = c("actual inflation" ="red", "predicted inflation"="blue")) 
   dev.off()
-
-#save plots HAC ####
-png(filename = here("1_Plots/NAIRU_HAC.png") , height=350, width=350)
-a <- ggplot(x_post_data) + geom_line( aes(x = date, y = NAIRU,group = 1,colour='NAIRU')) + theme_bw()
-a + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
-  geom_line(aes(x = date, y = unemp,group = 1,colour='unemployment rate')) +
-  scale_colour_manual(" ", values = c("NAIRU" ="red", "unemployment"="blue")) 
-dev.off()
-
-png(filename = here("1_Plots/kappa_HAC.png") , height=350, width=350)
-b <- ggplot(x_post_data) + geom_line( aes(x = date, y = kappa,group = 1)) + theme_bw()
-b + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
-dev.off()
-
-png(filename = here("1_Plots/gamma_HAC.png") , height=350, width=350)
-c <- ggplot(x_post_data) + geom_line( aes(x = date, y = gamma,group = 1)) + theme_bw()
-c + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
-dev.off()
-
-png(filename = here("1_Plots/theta_HAC.png") , height=350, width=350)
-d <- ggplot(x_post_data) + geom_line( aes(x = date, y = theta,group = 1)) + theme_bw()
-d + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2)
-dev.off()
-
-png(filename = here("1_Plots/fit_HAC.png") , height=350, width=350)
-e <- ggplot(x_post_data) + geom_line( aes(x = date, y = annualizedinflation,group = 1,colour='actual inflation')) + theme_bw()
-e + geom_rect(data=recessions.trim, aes(xmin=Peak, xmax=Trough, ymin=-Inf, ymax=+Inf), fill="grey", alpha=0.2) +
-  geom_line(aes(x = date, y = inflation,group = 1,colour='predicted inflation')) + 
-  scale_colour_manual(" ", values = c("actual inflation" ="red", "predicted inflation"="blue")) 
-dev.off()
-
-
-
-
