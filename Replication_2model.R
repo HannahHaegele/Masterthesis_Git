@@ -20,6 +20,8 @@ library(lmtest)
 library(zoo)
 library(ggrepel) #used for labeling scatter plot covid
 library("dynlm") #for time series regressions
+library("nloptr") #nonlinear optimisation
+library(pracma)
 
 #read in data ####
 
@@ -200,6 +202,9 @@ for (i in 1:31) {
 variance_estimate <- do.call(rbind, lapply( paste0("variance_estimate_", 1:31) , get) )
 variance_estimate_0 <- as.vector(colMeans(variance_estimate))
 
+coefficients <- do.call(rbind, lapply( paste0("coefficients_", 1:31) , get) )
+coefficients[,2] <- (-1)*coefficients[,2]
+coefficients_0 <- as.vector(colMeans(coefficients))[2:4]
 
 covariances_0 <- do.call(cbind, lapply( paste0("covariance_matrix_", 1:i) , get))
 covariances_0  <- array(covariances_0, dim=c(4,4,i))
@@ -213,27 +218,104 @@ initial.parameters <- c(0.9,variance_NAIRU*s, variance_estimate_0, variance_NAIR
 
 #Get parameter estimates via maximum likelihood
 
-#Generate coefficient matrices for the state-space model for the given parameter vector
+#Generate coefficient matrices for the state-space model for the given parameter vector, and some initial values
 
+
+unpack.parameters <- function(parameters) {
+  
 F <- matrix(0, 5, 5)
 F[1, 1] <- F[2, 1] <- F[3, 3] <- F[4, 4] <- F[5, 5]<- 1
 
-R <- diag(c(initial.parameters[2], initial.parameters[3]))
-Q <- diag(c(initial.parameters[4], 0, initial.parameters[5], initial.parameters[6], initial.parameters[7]))
+R <- diag(c(parameters[2], parameters[3]))
+Q <- diag(c(parameters[4], 0, parameters[5], parameters[6], parameters[7]))
+
+rho <- parameters[1]
 
 x_prior <- matrix(NA, nrow = 5, ncol = nrow(data1))
 x_post <- matrix(NA, nrow = 5, ncol = (nrow(data1)+1))
 x_post[,1] <- c(0,0,coefficients_0)
 
-h <- function(i) {
-  y[1] <- -(x_prior[2,i])*(x_prior[1,i]) + x_prior[3,i]*data1$relativeimportpriceinflation[i] + x_prior[4,i]*data1$expect[i] + (1-x_prior[4,i])*data1$yoy_inflation[i]
-  y[2] <- 1
-  }
+P_prior <- array(0, dim = c(5,5,nrow(data1)))
+P_post <- array(0, dim = c(5,5,nrow(data1)+1))
+P_post[,,1] <- matrix(0, nrow = 5, ncol = 5)
 
-H <- function(i) {
-  t(c(-(x_prior[2,i]), -(x_prior[1,i]), data1$relativeimportpriceinflation[i], (data1$expect[i]-data1$yoy_inflation[i])))
+return(list("F"=F, "Q"=Q, "R"=R, "rho"=rho))
 }
 
+kalman.log.likelihood <- function(F,Q,R,rho) {
+
+ll.vec <- matrix(0,(nrow(data1)),1)
+ll.cum <- 0
+n <- 2
+
+h <- function(i) {
+  y <- matrix(0,2,1)
+  y[1,1] <- x_prior[1,i] - rho*x_prior[2,i] + rho*data1$unemp[i]
+  y[2,1] <- -(x_prior[3,i])*(data1$unemp[i]-x_prior[2,i]) + x_prior[4,i]*data1$relativeimportpriceinflation[i+1] + x_prior[5,i]*data1$expect[i+1] + (1-x_prior[5,i])*data1$yoy_inflation[i+1]
+  return(y)
+}
+
+H <- function(i) {
+  a <- t(c(1, -rho, 0, 0, 0))
+  b <- t(c(0, (x_prior[3,i]), -(data1$unemp[i]-x_prior[2,i]), data1$relativeimportpriceinflation[i+1], (data1$expect[i+1]-data1$yoy_inflation[i+1])))
+  rbind(a,b)
+}
+
+z <- function(i) {
+  rbind(data1$unemp[i+1],data1$annualized_inflation[i+1])
+}
+
+x_prior <- matrix(NA, nrow = 5, ncol = nrow(data1))
+x_post <- matrix(NA, nrow = 5, ncol = (nrow(data1)+1))
+x_post[,1] <- c(0,0,coefficients_0)
+
+P_prior <- array(0, dim = c(5,5,nrow(data1)))
+P_post <- array(0, dim = c(5,5,nrow(data1)+1))
+P_post[,,1] <- matrix(0, nrow = 5, ncol = 5)
+
+for (i in 1:(nrow(data1)-1)) {
+  
+  #prediction step 
+  x_prior[,i] <- F %*% x_post[,i]
+  P_prior[,,i] <- F %*% tcrossprod(P_post[,,i],F) + Q 
+  
+  #update step part 1
+  y <- z(i) - h(i)
+  S <- H(i) %*% tcrossprod(P_prior[,,i],H(i)) + R
+  S_inv <- solve(S)
+  K <- tcrossprod(P_prior[,,i],H(i)) %*% S_inv
+  
+  #estimate log-likelihood 
+  ll.vec[i] <- drop(-(n / 2) * log(2 * atan(1) * 4) - 0.5 * log(det(S)) -0.5 * t(y) %*% solve(S, y))
+  ll.cum <- ll.cum + ll.vec[i]
+  
+  #update step part 2
+  x_post[,i+1] <- x_prior[,i] + K %*% y
+  P_post[,,i+1] <- (diag(1,5,5) - K %*% H(i)) %*% P_prior[,,i]
+  
+}
+
+return(list("ll.vec"=ll.vec,"ll.cum"=ll.cum,"x_post"=x_post))
+
+}
+
+log.likelihood.wrapper <- function(parameters){
+  
+  out <- unpack.parameters(parameters)
+  
+  for (n in names(out)) {
+    eval(parse(text=paste0(n, "<-out$", n)))
+  }
+  
+  return(kalman.log.likelihood(F, Q, R,rho))
+  
+}
+
+f <- function(omega) {return(-log.likelihood.wrapper(omega)$ll.cum)}
+
+nloptr.out <- nloptr(initial.parameters, f, eval_grad_f=function(x) {gradient(f, x)}, opts=list("algorithm"="NLOPT_LD_LBFGS","xtol_rel"=1.0e-8,"maxeval"=200))
+
+omega <- nloptr.out$solution
 
 
 #EKF recursions ####
@@ -242,32 +324,39 @@ H <- function(i) {
   s = 15 
   rho = 0.9
   
-  x_prior <- matrix(NA, nrow = 4, ncol = nrow(data1))
-  x_post <- matrix(NA, nrow = 4, ncol = (nrow(data1)+1))
-  x_post[,1] <- c(0,coefficients_0)
+  paramters <- initial.parameters
   
-  Q <- covariances_0
-  Q[1,] <- c(variance_NAIRU*s,0,0,0)
-  Q[,1] <- c(variance_NAIRU*s,0,0,0)
+  F <- matrix(0, 5, 5)
+  F[1, 1] <- F[2, 1] <- F[3, 3] <- F[4, 4] <- F[5, 5]<- 1
   
-  R <- variance_estimate_0 
+  R <- diag(c(parameters[2], parameters[3]))
+  Q <- diag(c(parameters[4], 0, parameters[5], parameters[6], parameters[7]))
   
-  P_prior <- array(0, dim = c(4,4,nrow(data1)))
-  P_post <- array(0, dim = c(4,4,nrow(data1)+1))
+  x_prior <- matrix(NA, nrow = 5, ncol = nrow(data1))
+  x_post <- matrix(NA, nrow = 5, ncol = (nrow(data1)+1))
+  x_post[,1] <- c(6,6,coefficients_0)
   
-  #P_post[,,1] <- matrix(0, nrow = 4, ncol = 4)
-  #P_post[,,1] <- diag(nrow = 4, ncol = 4)
-  P_post[,,1] <- Q
+  P_prior <- array(0, dim = c(5,5,nrow(data1)))
+  P_post <- array(0, dim = c(5,5,nrow(data1)+1))
+  P_post[,,1] <- matrix(0,nrow = 5, ncol = 5)
   
-  F <- diag(c(rho,1,1,1), 4, 4)
+  z <- function(i) {
+    rbind(data1$unemp[i+1],data1$annualized_inflation[i+1])
+  }
   
   h <- function(i) {
-    -(x_prior[2,i])*(x_prior[1,i]) + x_prior[3,i]*data1$relativeimportpriceinflation[i] + x_prior[4,i]*data1$expect[i] + (1-x_prior[4,i])*data1$yoy_inflation[i]
-    }
+    y <- matrix(0,2,1)
+    y[1,1] <- x_prior[1,i] - rho*x_prior[2,i] + rho*data1$unemp[i]
+    y[2,1] <- -(x_prior[3,i])*(data1$unemp[i]-x_prior[2,i]) + x_prior[4,i]*data1$relativeimportpriceinflation[i+1] + x_prior[5,i]*data1$expect[i+1] + (1-x_prior[5,i])*data1$yoy_inflation[i+1]
+    return(y)
+  }
   
   H <- function(i) {
-    t(c(-(x_prior[2,i]), -(x_prior[1,i]), data1$relativeimportpriceinflation[i], (data1$expect[i]-data1$yoy_inflation[i])))
+    a <- t(c(1, -rho, 0, 0, 0))
+    b <- t(c(0, (x_prior[3,i]), -(data1$unemp[i]-x_prior[2,i]), data1$relativeimportpriceinflation[i+1], (data1$expect[i+1]-data1$yoy_inflation[i+1])))
+    rbind(a,b)
   }
+  
 
   
 #Step 1: forward recursions
@@ -277,31 +366,37 @@ for (i in 1:(nrow(data1))) {
   x_prior[,i] <- F %*% x_post[,i]
   P_prior[,,i] <- F %*% tcrossprod(P_post[,,i],F) + Q 
   
-  #update step 
-  y <- data1$annualized_inflation[i]-h(i)
+  #update step part 1
+  y <- z(i) - h(i)
   S <- H(i) %*% tcrossprod(P_prior[,,i],H(i)) + R
   S_inv <- solve(S)
   K <- tcrossprod(P_prior[,,i],H(i)) %*% S_inv
   
+  #update step part 2
   x_post[,i+1] <- x_prior[,i] + K %*% y
-  P_post[,,i+1] <- (diag(1,4,4) - K %*% H(i)) %*% P_prior[,,i]
+  P_post[,,i+1] <- (diag(1,5,5) - K %*% H(i)) %*% P_prior[,,i]
+  
+}
+  
   
   #constraint 1 (adjustment of Kalman filter recursions when updated state vector does not satisfy inequality constraint)
-  if (x_post[2,i+1]<0 | x_post[3,i+1]<0 | x_post[4,i+1]<0 | x_post[4,i+1]>1) {
+  if (x_post[3,i+1]<0 | x_post[4,i+1]<0 | x_post[5,i+1]<0 | x_post[5,i+1]>1) {
     
     # lower-bounds 
-    A.lbs <- rbind(c( 1, 0, 0, 0),
-                   c( 0, 1, 0, 0),
-                   c( 0, 0, 1, 0),
-                   c( 0, 0, 0, 1))
-    b.lbs <- c(-1000, 0, 0, 0)
+    A.lbs <- rbind(c( 1, 0, 0, 0, 0),
+                   c( 0, 1, 0, 0, 0),
+                   c( 0, 0, 1, 0, 0),
+                   c( 0, 0, 0, 1, 0),
+                   c( 0, 0, 0, 0, 1))
+    b.lbs <- c(-1000, -1000, 0, 0, 0)
     
     # upper-bounds on variables
-    A.ubs <- rbind(c( -1, 0, 0, 0),
-                   c( 0, -1, 0, 0),
-                   c( 0, 0, -1, 0),
-                   c( 0, 0, 0, -1))
-    b.ubs <-  c(-1000, -1000, -1000, -1)
+    A.ubs <- rbind(c( -1, 0, 0, 0, 0),
+                   c( 0, -1, 0, 0, 0),
+                   c( 0, 0, -1, 0, 0),
+                   c( 0, 0, 0, -1, 0),
+                   c( 0, 0, 0, 0, -1))
+    b.ubs <-  c(-1000, -1000, -1000, -1000, -1)
     
     Amat = t(rbind(A.lbs, A.ubs))
     bvec = c(b.lbs, b.ubs)
