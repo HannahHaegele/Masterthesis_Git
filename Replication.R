@@ -19,6 +19,7 @@ library(forecast)
 library(lmtest)
 library(zoo)
 library(ggrepel) #used for labeling scatter plot covid
+library("dynlm") #for time series regressions
 
 #read in data ####
 
@@ -178,7 +179,7 @@ print(paste0("The AIC-optimal MA lag is ",ceiling(which.min(AIC)/(max.q+1)-1), "
 #rolling window regressions with ARMA errors ####
 for (i in 1:31) {
   
-  #10 year rolling window regressions
+  #10 year rolling window regressions Phillips Curve using original unemployment gap estimate
   data <- filter(data1, t>=1+(i-1)*12 & t<=120+(i-1)*12)
   reg0 <- lm(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data) 
   reg <- ConsRegArima(annualized_inflation~unemp+relativeimportpriceinflation+expect_yoy,data=data,order = c(4, 3),
@@ -196,19 +197,18 @@ for (i in 1:31) {
 
 #take the average of r.w. results: coefficient estimates, sigma2 as well as variance-covariance matrices
 
-coefficients <- do.call(rbind, lapply( paste0("coefficients_", 1:31) , get) )
-coefficients[,2] <- (-1)*coefficients[,2] #multiply by -1 to get positive value for kappa 
-coefficients_0 <- as.vector(colMeans(coefficients))[2:4]
-
 variance_estimate <- do.call(rbind, lapply( paste0("variance_estimate_", 1:31) , get) )
 variance_estimate_0 <- as.vector(colMeans(variance_estimate))
+
+coefficients <- do.call(rbind, lapply( paste0("coefficients_", 1:31) , get) )
+coefficients[,2] <- (-1)*coefficients[,2]
+coefficients_0 <- as.vector(colMeans(coefficients))[2:4]
 
 covariances_0 <- do.call(cbind, lapply( paste0("covariance_matrix_", 1:i) , get))
 covariances_0  <- array(covariances_0, dim=c(4,4,i))
 covariances_0 <- apply(covariances_0 , c(1, 2), mean, na.rm = TRUE)
 
-variance_NAIRU <- var(data1$NAIRU,na.rm = TRUE)
-
+variance_NAIRU <- var(data1$NAIRU)
 
 #EKF recursions ####
 
