@@ -1,6 +1,6 @@
-
-#preamble ####
 rm(list = ls())
+#Load required packages and source all programs to be used ####
+
 options(scipen = 999)
 
 library(tidyverse)
@@ -22,6 +22,12 @@ library(ggrepel) #used for labeling scatter plot covid
 library("dynlm") #for time series regressions
 library("nloptr") #nonlinear optimisation
 library(pracma)
+
+source("kalman.log.likelihood.R")
+source("log.likelihood.wrapper.R")
+source("unpack.parameters.R")
+
+
 
 #read in data ####
 
@@ -137,9 +143,10 @@ data <- merge(unemployment,inflation_expectation,by.x = "DATE", by.y = "DATE", a
   mutate(expect_yoy = expect-yoy_inflation) %>%
   mutate(relativeimportpriceinflation = importpriceinflation-annualized_inflation) %>%
   mutate(ugap = unemp-NAIRU) %>%
+  mutate(l1.unemp = lag(unemp,n=1)) %>%
   rename(date = DATE) %>%
   relocate(covid, .after = date) %>%
-  select(c(date,covid,unemp,expect,importpriceinflation,NAIRU,annualized_inflation,yoy_inflation,expect_yoy,relativeimportpriceinflation,ugap))
+  select(c(date,covid,unemp,expect,importpriceinflation,NAIRU,annualized_inflation,yoy_inflation,expect_yoy,relativeimportpriceinflation,ugap,l1.unemp))
 
   write_csv(data, here('0_Data/model_input_data.csv'))
 
@@ -212,110 +219,22 @@ covariances_0 <- apply(covariances_0 , c(1, 2), mean, na.rm = TRUE)
 
 variance_NAIRU <- var(data1$NAIRU)
 
+#maximum likelihood estimation ####
+
 #Starting values for the parameter vector
 s = 15 
 initial.parameters <- c(0.9,variance_NAIRU*s, variance_estimate_0, variance_NAIRU,covariances_0[2,2],covariances_0[3,3],covariances_0[4,4])
 
+
 #Get parameter estimates via maximum likelihood
-
-#Generate coefficient matrices for the state-space model for the given parameter vector, and some initial values
-
-
-unpack.parameters <- function(parameters) {
-  
-F <- matrix(0, 5, 5)
-F[1, 1] <- F[2, 1] <- F[3, 3] <- F[4, 4] <- F[5, 5]<- 1
-
-R <- diag(c(parameters[2], parameters[3]))
-Q <- diag(c(parameters[4], 0, parameters[5], parameters[6], parameters[7]))
-
-rho <- parameters[1]
-
-x_prior <- matrix(NA, nrow = 5, ncol = nrow(data1))
-x_post <- matrix(NA, nrow = 5, ncol = (nrow(data1)+1))
-x_post[,1] <- c(0,0,coefficients_0)
-
-P_prior <- array(0, dim = c(5,5,nrow(data1)))
-P_post <- array(0, dim = c(5,5,nrow(data1)+1))
-P_post[,,1] <- matrix(0, nrow = 5, ncol = 5)
-
-return(list("F"=F, "Q"=Q, "R"=R, "rho"=rho))
-}
-
-kalman.log.likelihood <- function(F,Q,R,rho) {
-
-ll.vec <- matrix(0,(nrow(data1)),1)
-ll.cum <- 0
-n <- 2
-
-h <- function(i) {
-  y <- matrix(0,2,1)
-  y[1,1] <- x_prior[1,i] - rho*x_prior[2,i] + rho*data1$unemp[i]
-  y[2,1] <- -(x_prior[3,i])*(data1$unemp[i]-x_prior[2,i]) + x_prior[4,i]*data1$relativeimportpriceinflation[i+1] + x_prior[5,i]*data1$expect[i+1] + (1-x_prior[5,i])*data1$yoy_inflation[i+1]
-  return(y)
-}
-
-H <- function(i) {
-  a <- t(c(1, -rho, 0, 0, 0))
-  b <- t(c(0, (x_prior[3,i]), -(data1$unemp[i]-x_prior[2,i]), data1$relativeimportpriceinflation[i+1], (data1$expect[i+1]-data1$yoy_inflation[i+1])))
-  rbind(a,b)
-}
-
-z <- function(i) {
-  rbind(data1$unemp[i+1],data1$annualized_inflation[i+1])
-}
-
-x_prior <- matrix(NA, nrow = 5, ncol = nrow(data1))
-x_post <- matrix(NA, nrow = 5, ncol = (nrow(data1)+1))
-x_post[,1] <- c(0,0,coefficients_0)
-
-P_prior <- array(0, dim = c(5,5,nrow(data1)))
-P_post <- array(0, dim = c(5,5,nrow(data1)+1))
-P_post[,,1] <- matrix(0, nrow = 5, ncol = 5)
-
-for (i in 1:(nrow(data1)-1)) {
-  
-  #prediction step 
-  x_prior[,i] <- F %*% x_post[,i]
-  P_prior[,,i] <- F %*% tcrossprod(P_post[,,i],F) + Q 
-  
-  #update step part 1
-  y <- z(i) - h(i)
-  S <- H(i) %*% tcrossprod(P_prior[,,i],H(i)) + R
-  S_inv <- solve(S)
-  K <- tcrossprod(P_prior[,,i],H(i)) %*% S_inv
-  
-  #estimate log-likelihood 
-  ll.vec[i] <- drop(-(n / 2) * log(2 * atan(1) * 4) - 0.5 * log(det(S)) -0.5 * t(y) %*% solve(S, y))
-  ll.cum <- ll.cum + ll.vec[i]
-  
-  #update step part 2
-  x_post[,i+1] <- x_prior[,i] + K %*% y
-  P_post[,,i+1] <- (diag(1,5,5) - K %*% H(i)) %*% P_prior[,,i]
-  
-}
-
-return(list("ll.vec"=ll.vec,"ll.cum"=ll.cum,"x_post"=x_post))
-
-}
-
-log.likelihood.wrapper <- function(parameters){
-  
-  out <- unpack.parameters(parameters)
-  
-  for (n in names(out)) {
-    eval(parse(text=paste0(n, "<-out$", n)))
-  }
-  
-  return(kalman.log.likelihood(F, Q, R,rho))
-  
-}
-
 f <- function(omega) {return(-log.likelihood.wrapper(omega)$ll.cum)}
 
-nloptr.out <- nloptr(initial.parameters, f, eval_grad_f=function(x) {gradient(f, x)}, opts=list("algorithm"="NLOPT_LD_LBFGS","xtol_rel"=1.0e-8,"maxeval"=200))
-
+nloptr.out <- nloptr(initial.parameters, f, eval_grad_f=function(x) {rootSolve::gradient(f, x)}, opts=list("algorithm"="NLOPT_LD_LBFGS","xtol_rel"=1.0e-8,"maxeval"=200))
 omega <- nloptr.out$solution
+
+#error: det(S) produced NaNs
+
+
 
 
 #EKF recursions ####
@@ -324,7 +243,7 @@ omega <- nloptr.out$solution
   s = 15 
   rho = 0.9
   
-  paramters <- initial.parameters
+  parameters <- initial.parameters
   
   F <- matrix(0, 5, 5)
   F[1, 1] <- F[2, 1] <- F[3, 3] <- F[4, 4] <- F[5, 5]<- 1
@@ -340,24 +259,24 @@ omega <- nloptr.out$solution
   P_post <- array(0, dim = c(5,5,nrow(data1)+1))
   P_post[,,1] <- matrix(0,nrow = 5, ncol = 5)
   
-  z <- function(i) {
-    rbind(data1$unemp[i+1],data1$annualized_inflation[i+1])
-  }
-  
-  h <- function(i) {
+  h <- function(i,rho,x_prior) {
     y <- matrix(0,2,1)
-    y[1,1] <- x_prior[1,i] - rho*x_prior[2,i] + rho*data1$unemp[i]
-    y[2,1] <- -(x_prior[3,i])*(data1$unemp[i]-x_prior[2,i]) + x_prior[4,i]*data1$relativeimportpriceinflation[i+1] + x_prior[5,i]*data1$expect[i+1] + (1-x_prior[5,i])*data1$yoy_inflation[i+1]
+    y[1,1] <- x_prior[1,i] - rho*x_prior[2,i] + rho*data1$l1.unemp[i]
+    y[2,1] <- -(x_prior[3,i])*(data1$unemp[i]-x_prior[2,i]) + x_prior[4,i]*data1$relativeimportpriceinflation[i] + x_prior[5,i]*data1$expect[i] + (1-x_prior[5,i])*data1$yoy_inflation[i]
     return(y)
   }
   
-  H <- function(i) {
+  H <- function(i,rho,x_prior) {
     a <- t(c(1, -rho, 0, 0, 0))
-    b <- t(c(0, (x_prior[3,i]), -(data1$unemp[i]-x_prior[2,i]), data1$relativeimportpriceinflation[i+1], (data1$expect[i+1]-data1$yoy_inflation[i+1])))
+    b <- t(c((x_prior[3,i]), 0, -(data1$unemp[i]-x_prior[2,i]), data1$relativeimportpriceinflation[i], (data1$expect[i]-data1$yoy_inflation[i])))
     rbind(a,b)
   }
   
-
+  z <- function(i) {
+    rbind(data1$unemp[i],data1$annualized_inflation[i])
+  }
+  
+detS <- c()  
   
 #Step 1: forward recursions
 for (i in 1:(nrow(data1))) {
@@ -367,16 +286,17 @@ for (i in 1:(nrow(data1))) {
   P_prior[,,i] <- F %*% tcrossprod(P_post[,,i],F) + Q 
   
   #update step part 1
-  y <- z(i) - h(i)
-  S <- H(i) %*% tcrossprod(P_prior[,,i],H(i)) + R
+  y <- z(i) - h(i,rho,x_prior)
+  S <- H(i,rho,x_prior) %*% tcrossprod(P_prior[,,i],H(i,rho,x_prior)) + R
   S_inv <- solve(S)
-  K <- tcrossprod(P_prior[,,i],H(i)) %*% S_inv
+  detS[i] <- log(det(S))
+  K <- tcrossprod(P_prior[,,i],H(i,rho,x_prior)) %*% S_inv
   
   #update step part 2
   x_post[,i+1] <- x_prior[,i] + K %*% y
-  P_post[,,i+1] <- (diag(1,5,5) - K %*% H(i)) %*% P_prior[,,i]
+  P_post[,,i+1] <- (diag(1,5,5) - K %*% H(i,rho,x_prior)) %*% P_prior[,,i]
   
-}
+
   
   
   #constraint 1 (adjustment of Kalman filter recursions when updated state vector does not satisfy inequality constraint)
@@ -402,23 +322,33 @@ for (i in 1:(nrow(data1))) {
     bvec = c(b.lbs, b.ubs)
     
     #representation in quadratic programming form  
-    Dmat <- matrix(0,4,4)
+    Dmat <- matrix(0,5,5)
     
     P_post_inv <- solve(P_post[,,i+1])
     diag(Dmat) <- diag(P_post_inv)*2
     
-    Dmat[lower.tri(Dmat)] <- c(P_post_inv[1,2]+P_post_inv[2,1], P_post_inv[1,3]+P_post_inv[3,1],P_post_inv[1,4]+P_post_inv[4,1],P_post_inv[2,3]+P_post_inv[3,2],P_post_inv[2,4]+P_post_inv[4,2],P_post_inv[3,4]+P_post_inv[4,3])
-    Dmat[upper.tri(Dmat)] <- c(P_post_inv[1,2]+P_post_inv[2,1], P_post_inv[1,3]+P_post_inv[3,1],P_post_inv[2,3]+P_post_inv[3,2],P_post_inv[4,1]+P_post_inv[1,4],P_post_inv[2,4]+P_post_inv[4,2],P_post_inv[3,4]+P_post_inv[4,3])
+    Dmat[lower.tri(Dmat)] <- c(P_post_inv[1,2]+P_post_inv[2,1], P_post_inv[1,3]+P_post_inv[3,1],P_post_inv[1,4]+P_post_inv[4,1],P_post_inv[1,5]+P_post_inv[5,1],
+                               P_post_inv[2,3]+P_post_inv[3,2],P_post_inv[2,4]+P_post_inv[4,2],P_post_inv[2,5]+P_post_inv[5,2],
+                               P_post_inv[3,4]+P_post_inv[4,3],P_post_inv[3,5]+P_post_inv[5,3],
+                               P_post_inv[4,5]+P_post_inv[5,4])
     
-    a <- t(-x_post[,i+1]) %*% P_post_inv[,1] + P_post_inv[1,1] * (-x_post[1,i+1]) + P_post_inv[1,2] * (-x_post[2,i+1]) + P_post_inv[1,3] * (-x_post[3,i+1]) + P_post_inv[1,4] * (-x_post[4,i+1])
+    Dmat[upper.tri(Dmat)] <- c(P_post_inv[1,2]+P_post_inv[2,1],
+                               P_post_inv[1,3]+P_post_inv[3,1],P_post_inv[2,3]+P_post_inv[3,2],
+                               P_post_inv[1,4]+P_post_inv[4,1],P_post_inv[2,4]+P_post_inv[4,2],P_post_inv[3,4]+P_post_inv[4,3],
+                               P_post_inv[1,5]+P_post_inv[5,1],P_post_inv[2,5]+P_post_inv[5,2],P_post_inv[3,5]+P_post_inv[5,3],P_post_inv[4,5]+P_post_inv[5,4])
+      
+
+    a <- t(-x_post[,i+1]) %*% P_post_inv[,1] + P_post_inv[1,1] * (-x_post[1,i+1]) + P_post_inv[1,2] * (-x_post[2,i+1]) + P_post_inv[1,3] * (-x_post[3,i+1]) + P_post_inv[1,4] * (-x_post[4,i+1] + P_post_inv[1,5] * (-x_post[5,i+1]))
     
-    b <- t(-x_post[,i+1]) %*% P_post_inv[,2] + P_post_inv[2,2] * (-x_post[2,i+1]) + P_post_inv[2,1] * (-x_post[1,i+1]) + P_post_inv[2,3] * (-x_post[3,i+1]) + P_post_inv[2,4] * (-x_post[4,i+1])
+    b <- t(-x_post[,i+1]) %*% P_post_inv[,2] + P_post_inv[2,2] * (-x_post[2,i+1]) + P_post_inv[2,1] * (-x_post[1,i+1]) + P_post_inv[2,3] * (-x_post[3,i+1]) + P_post_inv[2,4] * (-x_post[4,i+1] + P_post_inv[2,5] * (-x_post[5,i+1]))
     
-    c <- t(-x_post[,i+1]) %*% P_post_inv[,3] + P_post_inv[3,3] * (-x_post[3,i+1]) + P_post_inv[3,1] * (-x_post[1,i+1]) + P_post_inv[3,2] * (-x_post[2,i+1]) + P_post_inv[3,4] * (-x_post[4,i+1])
+    c <- t(-x_post[,i+1]) %*% P_post_inv[,3] + P_post_inv[3,3] * (-x_post[3,i+1]) + P_post_inv[3,1] * (-x_post[1,i+1]) + P_post_inv[3,2] * (-x_post[2,i+1]) + P_post_inv[3,4] * (-x_post[4,i+1] + P_post_inv[3,5] * (-x_post[5,i+1]))
     
-    d <- t(-x_post[,i+1]) %*% P_post_inv[,4] + P_post_inv[4,4] * (-x_post[4,i+1]) + P_post_inv[4,1] * (-x_post[1,i+1]) + P_post_inv[4,2] * (-x_post[2,i+1]) + P_post_inv[4,3] * (-x_post[3,i+1])
+    d <- t(-x_post[,i+1]) %*% P_post_inv[,4] + P_post_inv[4,4] * (-x_post[4,i+1]) + P_post_inv[4,1] * (-x_post[1,i+1]) + P_post_inv[4,2] * (-x_post[2,i+1]) + P_post_inv[4,3] * (-x_post[3,i+1] + P_post_inv[4,5] * (-x_post[5,i+1]))
     
-    dvec <- c(-a,-b,-c,-d)
+    e <- t(-x_post[,i+1]) %*% P_post_inv[,5] + P_post_inv[5,5] * (-x_post[5,i+1]) + P_post_inv[5,1] * (-x_post[1,i+1]) + P_post_inv[5,2] * (-x_post[2,i+1]) + P_post_inv[5,3] * (-x_post[3,i+1] + P_post_inv[5,4] * (-x_post[4,i+1]))
+    
+    dvec <- c(-a,-b,-c,-d,-e)
     
     solve.QP(Dmat,dvec,Amat,bvec=bvec)
     
@@ -426,6 +356,7 @@ for (i in 1:(nrow(data1))) {
     x_post[,i+1] <- solve.QP(Dmat,dvec,Amat,bvec=bvec)$solution
     
   }
+}
   
   #constraint 2 (deviation of ML estimates of shock variances relative to initial estimates obtained from rolling regressions)
   #assumed that the logical order of these constraints is this way, could possibly be the other way round? 

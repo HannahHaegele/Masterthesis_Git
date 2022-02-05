@@ -1,0 +1,114 @@
+\documentclass{article}
+\usepackage[a4paper,
+            bindingoffset=0.2in,
+            left=0.3in,
+            right=0.3in,
+            top=1in,
+            bottom=1in,
+            footskip=.25in]{geometry}
+
+\begin{document}
+
+\section{Relationship between Unemployment Gap and Inflation since 04-2020}
+
+<<echo=FALSE, message=FALSE, error=FALSE, warning=FALSE, comment=" ">>=
+#preamble ####
+rm(list = ls())
+options(scipen = 999)
+
+library(tidyverse)
+library(readr)
+library(corrplot)
+library(dplyr)
+library(magrittr)
+library(data.table)
+library(here)
+library(seasonal) #used for seasonsal adjustment
+library(ggplot2)
+library(ConsReg)
+library(quadprog)
+library(cowplot)
+library(forecast)
+library(lmtest)
+library(zoo)
+library(ggrepel) #used for labeling scatter plot covid
+
+
+#scatter-plot COVID ####
+
+data1 <- read.table(here('2_Files/model_input_data.csv'),
+                   sep=',',header=TRUE,stringsAsFactors=FALSE, na.strings=".")
+
+
+## Get data in vector form beginning at est.data.start (set above)
+data1 <- data.frame(lapply(data1, function(x) as.numeric(as.character(x))))
+data1$date <- as.Date(data1$date)
+
+## Add groups 
+data1 <- mutate(data1, group = ifelse(date < "1985-01-01", "1975-1985", ifelse (date < "1995-01-01", "1985-1995", ifelse (date < "2020-04-01", "1995-2020", "2020-present")))) %>%
+        mutate(data1, group1 = ifelse(date > "1990-01-01" & date < "2000-01-01", "1990-2000", ifelse (date > "2000-01-01" & date < "2010-01-01", "2000-2010", ifelse (date > "2010-01-01" & date < "2020-01-01", "2010-2020", "2020-present"))))
+
+
+ggplot(data=data1, aes(x=gap, y=inflation)) + geom_point(aes(colour = factor(group)))
+ggplot(data=data1 %>% filter(date > "1990-01-01"), aes(x=gap, y=inflation)) + geom_point(aes(colour = factor(group1)))
+@
+
+This graph shows the relationship between cyclical unemployment and the level of inflation. "Broadly speaking, inflation was high in the late 1970s and early 1980s, when the relationship between inflation and unemployment appears relatively steep; it was more muted between 1985 and 1994, when many economies experienced disinflation as central banks started establishing the current targeting regimes; and it was particularly flat after 1995, a period of stable inflation around 2 percent." The most recent period since the onset of the COVID pandemic suggests a again relatively steep relationship. 
+
+The second graph shows the same relationship, but takes a closer picture of the periods between 1990 and the present. The relationship appears relatively steep in the first period. The relationship then mutes, but appears relatively steeper in the 2010-2020 period compared to the 2000-2010 period. 
+
+<<echo=FALSE, message=FALSE, error=FALSE, warning=FALSE, comment=" ">>=
+
+ ## previous graphs 
+
+data <- read.csv(here('0_Data/model_input_data.csv')) %>%
+        mutate(date = as.Date(c(as.character(date)), format="%Y-%m-%d")) %>%
+        mutate(greatrecession = ifelse(date > "2009-05-01" & date < "2011-05-01", 1, 0)) %>%
+        mutate(covid = ifelse(date > "2020-03-01", 1, 0)) %>%
+        mutate(greatinflation = ifelse(date > "1973-02-01" & date < "1975-02-01", 1, 0))
+
+covid <- ggplot(data=data %>% filter(covid==1), aes(x=ugap, y=annualized_inflation, label = date))+
+  geom_point() + geom_line(color="grey") 
+covid +  geom_text_repel(aes(label = as.character(date)), size = 3)
+
+greatrecession <- ggplot(data=data %>% filter(greatrecession==1), aes(x=ugap, y=annualized_inflation, label = date))+
+  geom_point() + geom_line(color="grey") 
+greatrecession +  geom_text_repel(aes(label = as.character(date)), size = 3)
+
+greatinflation <- ggplot(data=data %>% filter(greatinflation==1), aes(x=ugap, y=annualized_inflation, label = date))+
+  geom_point() + geom_line(color="grey") 
+greatinflation +  geom_text_repel(aes(label = as.character(date)), size = 3)
+@
+
+The first graph depicts the aftermath of the official COVID-19 recession, which lasted according to the NBER from 2020-02 to 2020-04. The graph indicates that there is an inverse relationship between the unemployment gap and the inflation rate, as suggested by the Phillips Curve. It seems as if the slope gets steeper, when inflation is in generally higher. Evidence shows that the slope flattens in low inflation environments as well as during recessions. However, it is somewhat weird that both inflation and unemployment decreases between 2020-08 and 2021-03. \\
+
+Hypothesis 1: The slope of the Phillips Curve gets steeper in the aftermath of the official Pandemic recession (compared to the beginning of the same period).  \\
+
+The second graph depicts the aftermath (2 years) after the Great Recession. The graph indicates that there is merely a (inverse) relationship between the unemployment gap and the inflation rate. Inflation seems rather driven by other factors, thus the slope of the Phillips Curve during that period must be really small. It must be noted though, that both inflation and unemployment gap do not reaches values as high as in the COVID case. \\
+
+The third graph depicts 2 years during the Great Inflation in order to assess the relationship in a high-inflation environment. The graph indicates a initially recognizable but then missing inverse relationship. 
+
+(Hypothesis 2: The steeper slope in the aftermath of the official Pandemic recession is more likely to be driven by the high inflation than by the "after recession characteristics". Can we compare the different types of recessions?) 
+
+<<echo=FALSE, message=FALSE, error=FALSE, warning=FALSE, comment=" ">>=
+#inflation - unemployment  ####
+
+ggplot(subset(data,date >"2007-12-01")) + geom_line( aes(x = date, y = annualized_inflation,group = 1,colour='inflation')) + theme_bw() +
+    geom_line(aes(x = date, y = ugap,group = 1,colour='unemployment gap')) + 
+    scale_colour_manual(" ", values = c("inflation" ="red", "unemployment gap"="blue")) 
+
+@
+
+This graph shows the co-movement of inflation and the unemployment gap since the beginning of 2008. First, the graph indicates that inflation reacted stronger to the unemployment gap in the aftermath of the COVID recession compared to the same recession itself, i.e. a less steep decrease in the unemployment gap induced a relatively larger increase in the inflation rate (Hypothesis 1). Second, the graph indicates that inflation reacted stronger to the increase in the unemployment gap during the financial crisis than during the COVID recession, which means that the slope of the Phillips Curve must be larger during the 2008 recession compared to the more recent one. \\
+
+Hypothesis 2: The slope during the Financial Crisis is larger than the slope during the COVID recession. \\
+
+When we stop the observations right after the COVID recession, i.e. 2020-04, the overall picture would reflect the evidence of a flattened Phillips Curve. However, the suggested stronger relationship in its aftermath somewhat contradicts that view. What factors can explain the seemingly stronger relationship after the outbreak of the pandemic? Or is the co-movement rather a coincidence, i.e. does the unemployment gap just slowly return to a pre-crisis level and is inflation driven by other factors, such as higher inflation expectations (increased inflation salience, high price volatilities of frequently used products and services), pandemic-owed supply shocks etc.?
+
+
+Why has (core) inflation not fallen further during the COVID recession? 
+Why has (core) inflation risen after the COVID recession? 
+
+
+
+\end{document}
